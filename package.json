@@ -1,0 +1,54 @@
+{
+  "name": "cloudflare-axi",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "description": "AXI-compliant Cloudflare CLI (wrangler) wrapper — token-efficient TOON output, structured errors, agent-first ergonomics",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simkimsia/cloudflare-axi.git"
+  },
+  "keywords": [
+    "cloudflare",
+    "wrangler",
+    "cli",
+    "agent",
+    "axi",
+    "toon"
+  ],
+  "bin": {
+    "cloudflare-axi": "./dist/bin/cloudflare-axi.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx bin/cloudflare-axi.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepublishOnly": "npm run build"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@toon-format/toon": "^2.1.0",
+    "axi-sdk-js": "^0.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
