@@ -18,6 +18,20 @@ Early scaffold (v0). Read-only commands only.
 - [wrangler](https://developers.cloudflare.com/workers/wrangler/) installed
   and logged in (`wrangler login`, or `CLOUDFLARE_API_TOKEN` set)
 
+## Install
+
+Not on npm yet, so `npx -y cloudflare-axi` does not work. Install from a clone:
+
+```sh
+git clone https://github.com/simkimsia/cloudflare-axi
+pnpm --prefix cloudflare-axi install
+pnpm --prefix cloudflare-axi run build
+pnpm --prefix cloudflare-axi link --global   # puts `cloudflare-axi` on PATH
+```
+
+Check it: `cloudflare-axi --version`. To update later, `git pull` in the clone
+and run the build step again.
+
 ## Usage
 
 ```sh
