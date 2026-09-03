@@ -43,6 +43,19 @@ help[2]:
   Run `cloudflare-axi whoami` to see which account this is
 ```
 
+## Agent skill
+
+Install the bundled skill so your coding agent prefers `cloudflare-axi` over raw
+`wrangler`, falls back to `wrangler` when a command is not wrapped yet, and
+files the gap as an issue here (label `agent-reported-gap`):
+
+```sh
+npx skills add simkimsia/cloudflare-axi --skill cloudflare-axi -g
+```
+
+The skill is a discovery stub that defers to `cloudflare-axi --help` for current
+command guidance. Source: [`skills/cloudflare-axi/SKILL.md`](skills/cloudflare-axi/SKILL.md).
+
 ## Development
 
 ```sh
