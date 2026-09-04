@@ -27,6 +27,12 @@ concurrency:
   group: repo-triage
   cancel-in-progress: false
 
+# Provenance stamped into every verdict: <!-- triage: ... model= harness= run= -->
+# TRIAGE_MODEL is the single source of truth for --model below. Change it here only.
+env:
+  TRIAGE_MODEL: claude-opus-5
+  TRIAGE_HARNESS: claude-github-app
+
 jobs:
   triage:
     runs-on: ubuntu-latest
@@ -46,9 +52,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: "/repo-triage owner=${{ inputs.owner || 'simkimsia' }} mode=${{ inputs.mode || 'dry-run' }}"
+          prompt: "/repo-triage owner=${{ inputs.owner || 'simkimsia' }} mode=${{ inputs.mode || 'dry-run' }} model=${{ env.TRIAGE_MODEL }} harness=${{ env.TRIAGE_HARNESS }} run=${{ github.run_id }}"
           claude_args: |
-            --model claude-opus-5
+            --model ${{ env.TRIAGE_MODEL }}
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Write,Bash(python3 .claude/skills/repo-triage/scripts/fetch.py:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
 

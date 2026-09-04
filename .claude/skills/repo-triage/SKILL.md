@@ -20,10 +20,15 @@ Pattern cribbed from kunchenguid/grok-ship (`TRIAGE.md`, `skills/vision-md-triag
 | firstmate-mark                 | the disclosure line                                   |
 | stale days                     | 14                                                    |
 | mode                           | `dry-run` unless the arguments say `mode=live`        |
+| model                          | `model=` in the arguments, else omitted               |
+| harness                        | `harness=` in the arguments, else omitted             |
+| run                            | `run=` in the arguments, else omitted                 |
 
 Arguments arrive as `key=value` pairs: `$ARGUMENTS`
 
-Parse `owner=` and `mode=` from them. Missing keys take the charter defaults above.
+Parse `owner=`, `mode=`, `model=`, `harness=`, and `run=` from them. Missing `owner=` and `mode=` take the charter defaults above.
+
+`model`, `harness`, and `run` are provenance. The workflow passes them in because you cannot see your own model id or the run you are in. Copy them verbatim. If one is missing, leave its key out of the stamp. Never guess a value.
 
 ## Hard rules
 
@@ -119,14 +124,16 @@ Contract-class: restore | new-default | opt-in | cannot-tell. <evidence>
 
 <closing line: "Labeling ready-for-pr." or "Holding for the captain: <why>." or "Already on main." or "Waiting on author: <what>.">
 
-<!-- triage: <ISO8601 UTC now> outcome=<outcome> contract=<class> -->
+<!-- triage: <ISO8601 UTC now> outcome=<outcome> contract=<class> model=<model> harness=<harness> run=<run> -->
 ```
 
 Plain direct sentences. No em dashes.
 
+The stamp is what later runs read to know this item was triaged, so keep it on one line and keep `outcome=` intact. `model=`, `harness=`, and `run=` come from the arguments; drop any key whose argument was not passed. A reader can open the comment source to see which model, under which harness, in which run produced the verdict.
+
 ### 8. Deliver
 
-Always write `triage-out/verdicts.md` (create the directory) containing, for each item in order: a heading with the number, title, and URL, then the full comment body from step 7 in a fenced block, then a blank line. If the queue was empty, write one line saying so with the timestamp. The workflow appends this file to the run summary.
+Always write `triage-out/verdicts.md` (create the directory). Start with a header line: the timestamp, the mode, the owner override if any, and the `model`, `harness`, and `run` values that were passed. Then, for each item in order: a heading with the number, title, and URL, then the full comment body from step 7 in a fenced block, then a blank line. If the queue was empty, write the header line and one line saying so. The workflow appends this file to the run summary.
 
 In `dry-run` mode, stop here.
 
@@ -151,3 +158,4 @@ PR comments are out of scope on purpose, and `gh pr comment` is not in the allow
 - Do not open, close, merge, or assign anything
 - Do not comment on items authored by the owner login unless `owner=` was overridden for this run
 - Do not ask questions. There is nobody to answer. Write `cannot tell` and continue
+- Do not invent `model=`, `harness=`, or `run=` values. Copy them from the arguments or omit the key
