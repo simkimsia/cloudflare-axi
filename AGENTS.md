@@ -60,6 +60,22 @@ the upstream `kunchenguid/axi` repo).
   field names.
 - `wrangler kv namespace list` always emits raw JSON; there is no `--json`
   flag (passing one is an error).
+- `wrangler pages deployment list --project-name <n> --json` has the same
+  display-key quirk, and its `Status` field is a pre-rendered relative time
+  ("1 day ago"), not a status. Newest first. Missing project → "Project not
+  found. ... [code: 8000007]".
+- `wrangler pages deploy <dir>` is text-only (progress lines, then
+  "✨ Deployment complete! Take a peek over at <url>" and, for non-production
+  branches, "✨ Deployment alias URL: <url>"). It has no id or environment,
+  so `pages deploy` looks the URL up in the deployment list afterwards. It
+  publishes an EMPTY directory without complaint ("Uploaded 0 files"), which
+  is why `assertDeployableDir` runs first. Missing project → 'The Pages
+  project "x" does not exist.' (no numeric code). The wrapper always passes
+  `--commit-dirty=true` so the cwd's git state never prompts.
+- `wrangler pages project create <n>` is text-only ("✨ Successfully created
+  the 'x' project. It will be available at https://x.pages.dev/ ..."); a
+  taken name → "[code: 8000002]" → `ALREADY_EXISTS`. The production branch
+  defaults to `main` on the wrangler side too.
 - `wrangler deployments list` is directory-scoped: it needs a Worker name
   from a wrangler config in cwd (or `--name`); without one it fails with
   "You need to provide a name for your Worker" → mapped to `NOT_CONFIGURED`
@@ -75,6 +91,14 @@ the upstream `kunchenguid/axi` repo).
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`
   works with no code here; the npm package name resolves from `package.json`.
+
+## Live smoke procedure for Pages writes
+
+Tests are offline, so after touching `pages create` / `deploy`, smoke it for
+real on a throwaway project and delete it afterwards:
+`cloudflare-axi pages create cloudflare-axi-smoke`, deploy a one-file dir,
+`cloudflare-axi pages deployments cloudflare-axi-smoke`, then
+`wrangler pages project delete cloudflare-axi-smoke --yes`.
 
 ## Cloudflare REST API notes (verified live 2026-09-04)
 

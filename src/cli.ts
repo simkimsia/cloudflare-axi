@@ -23,6 +23,7 @@ flags[2]:
 examples:
   cloudflare-axi
   cloudflare-axi pages
+  cloudflare-axi pages deploy ./dist --project my-site
   cloudflare-axi deployments
   cloudflare-axi email --zone example.com
 `;

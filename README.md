@@ -10,7 +10,9 @@ reference implementation [`gh-axi`](https://github.com/kunchenguid/gh-axi).
 
 ## Status
 
-Early scaffold (v0). Read-only commands only.
+Early scaffold (v0). Read commands, plus the first write commands on Pages
+(`pages create`, `pages deploy`). Writes are explicit verbs that name their
+target in full and print what changed; nothing is inferred from context.
 
 ## Requirements
 
@@ -46,6 +48,9 @@ and run the build step again.
 cloudflare-axi              # dashboard: this directory's Worker, or Pages projects
 cloudflare-axi deployments  # recent deployments of the Worker configured in cwd
 cloudflare-axi pages        # all Pages projects in your account
+cloudflare-axi pages create <name> [--production-branch main]
+cloudflare-axi pages deploy <dir> --project <name> [--branch main]   # default branch main = production
+cloudflare-axi pages deployments <name> [--environment production|preview]
 cloudflare-axi kv           # all Workers KV namespaces in your account
 cloudflare-axi whoami       # logged-in Cloudflare account
 cloudflare-axi email --zone example.com            # Email Routing status, destinations, rules
@@ -64,8 +69,9 @@ count: 2 Pages projects
 projects[2]{name,domain,git,modified}:
   my-docs,my-docs.pages.dev,no,6 days ago
   my-book,my-book.pages.dev,yes,4 years ago
-help[2]:
-  Run `wrangler pages deployment list --project-name <name>` for a project's deployments
+help[3]:
+  Run `cloudflare-axi pages deployments <name>` for a project's deployments
+  Run `cloudflare-axi pages deploy <dir> --project <name>` to publish a static directory
   Run `cloudflare-axi whoami` to see which account this is
 ```
 

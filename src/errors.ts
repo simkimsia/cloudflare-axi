@@ -2,6 +2,7 @@ export type ErrorCode =
   | "AUTH"
   | "NOT_CONFIGURED"
   | "NOT_FOUND"
+  | "ALREADY_EXISTS"
   | "VALIDATION_ERROR"
   | "WRANGLER_NOT_INSTALLED"
   | "UNKNOWN";
@@ -64,6 +65,7 @@ const patterns: ErrorPattern[] = [
     suggestions: [
       "Run `wrangler login` in an interactive terminal, then retry",
       "Or set CLOUDFLARE_API_TOKEN for non-interactive use",
+      "Already logged in? wrangler stores its login under ~/.wrangler or, on macOS, ~/Library/Preferences/.wrangler; a shell with a different HOME will not see it",
     ],
   },
   {
@@ -77,6 +79,33 @@ const patterns: ErrorPattern[] = [
     suggestions: [
       "Run `wrangler whoami` to inspect the active credentials",
       "Run `wrangler login`, or fix CLOUDFLARE_API_TOKEN, then retry",
+      "A CLOUDFLARE_API_TOKEN also needs the permission for this operation (e.g. Pages:Edit to create or deploy a Pages project)",
+    ],
+  },
+  {
+    // Real stderr (`wrangler pages deploy` to an unknown project): 'The
+    // Pages project "x" does not exist.' followed by Workers upsell text.
+    // `wrangler pages deployment list` says instead: "Project not found. The
+    // specified project name does not match any of your existing projects.
+    // [code: 8000007]".
+    pattern:
+      /Pages project "[^"]+" does not exist|\[code: 8000007\]|Project not found\./i,
+    code: "NOT_FOUND",
+    suggestions: [
+      "Run `cloudflare-axi pages` to list the projects in this account",
+      "Run `cloudflare-axi pages create <name>` to create it first",
+    ],
+  },
+  {
+    // Real stderr (`wrangler pages project create` with a taken name): "A
+    // project with this name already exists. Choose a different project
+    // name. [code: 8000002]".
+    pattern: /\[code: 8000002\]|A project with this name already exists/i,
+    code: "ALREADY_EXISTS",
+    message: "A Pages project with this name already exists in this account",
+    suggestions: [
+      "Run `cloudflare-axi pages deploy <dir> --project <name>` to deploy to the existing project",
+      "Or pick a different name",
     ],
   },
   {
