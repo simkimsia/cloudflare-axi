@@ -1,0 +1,70 @@
+name: Repo triage
+
+# Standing triage crewmate. Fetches the eligible issue/PR queue, renders a
+# per-rule VISION.md verdict, and in dry-run mode writes the verdicts to the
+# run summary only. Switch to live by dispatching with mode=live and granting
+# issues: write below. Never merges, closes, or opens PRs.
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: "GitHub login the fetch skips (pilot: pass a dummy so the owner's own issues get triaged)"
+        required: false
+        default: "simkimsia"
+      mode:
+        description: "dry-run (log only) or live (post comment + ready-for-pr label)"
+        required: false
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - live
+
+concurrency:
+  group: repo-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: "/repo-triage owner=${{ inputs.owner || 'simkimsia' }} mode=${{ inputs.mode || 'dry-run' }}"
+          claude_args: |
+            --model claude-opus-5
+            --max-turns 40
+            --allowedTools "Read,Glob,Grep,Write,Bash(python3 .claude/skills/repo-triage/scripts/fetch.py:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+
+      - name: Publish verdicts to the run summary
+        if: always()
+        run: |
+          if [ -f triage-out/verdicts.md ]; then
+            cat triage-out/verdicts.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No triage-out/verdicts.md was written." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep verdicts as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triage-verdicts
+          path: triage-out/
+          if-no-files-found: ignore
