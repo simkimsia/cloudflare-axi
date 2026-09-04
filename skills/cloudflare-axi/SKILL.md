@@ -39,14 +39,14 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface is read-only v0: `deployments` (recent deployments of the Worker configured in cwd), `pages` (Pages projects), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, via the REST API since wrangler has no Email Routing commands).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, via the REST API since wrangler has no Email Routing commands).
 
 ## When cloudflare-axi cannot do it
 
 1. Try `cloudflare-axi <command>` first and read the structured error.
 2. If the error is `VALIDATION_ERROR` with `Unknown command`, or the command
    exists but lacks the flag you need, fall back to raw `wrangler` and finish
-   the user's task. Examples: `wrangler pages deployment list --project-name <name>`, `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
+   the user's task. Examples: `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
    For products wrangler does not cover (Email Routing writes, DNS records),
    fall back to the REST API with `curl` and `CLOUDFLARE_API_TOKEN` or the
    wrangler OAuth token; `cloudflare-axi email --help` says where that token lives.
@@ -83,8 +83,12 @@ Today's surface is read-only v0: `deployments` (recent deployments of the Worker
    Tell the user you filed it and link the issue. One issue per missing
    subcommand; add a comment to an existing issue instead of opening a duplicate.
 
+## Writes
+
+`pages create` and `pages deploy` are the only write commands so far. `pages deploy` defaults to `--branch main`, which is a production deploy; pass another `--branch` for a preview. It refuses a missing or empty directory before calling wrangler.
+
 ## Deliberately not wrapped (do not file)
 
-Mutating commands: `wrangler deploy`, `wrangler pages deploy`, `wrangler kv key put/delete`, `wrangler delete`, `wrangler secret put`, `wrangler d1 execute` with writes.
+Other mutating commands: `wrangler deploy`, `wrangler kv key put/delete`, `wrangler delete`, `wrangler pages project delete`, `wrangler secret put`, `wrangler d1 execute` with writes.
 These are excluded by design in v0. Use `wrangler` directly, tell the user
 you did so, and do not open an issue for them.
