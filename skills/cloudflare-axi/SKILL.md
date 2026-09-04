@@ -1,11 +1,11 @@
 ---
 name: cloudflare-axi
-description: "Operate Cloudflare through the cloudflare-axi CLI - Workers deployments, Pages projects, KV namespaces, and account identity. Use whenever a task touches Cloudflare. Prefer it over raw `wrangler`; when a command is not wrapped yet, fall back to `wrangler` and report the gap as a GitHub issue on simkimsia/cloudflare-axi."
+description: "Operate Cloudflare through the cloudflare-axi CLI - Workers deployments, Pages projects, KV namespaces, Email Routing, and account identity. Use whenever a task touches Cloudflare. Prefer it over raw `wrangler`; when a command is not wrapped yet, fall back to `wrangler` (or the REST API where wrangler has no surface) and report the gap as a GitHub issue on simkimsia/cloudflare-axi."
 user-invocable: false
 author: KimSia Sim (simkimsia)
 metadata:
   hermes:
-    tags: [cloudflare, wrangler, workers, pages, kv, deployments]
+    tags: [cloudflare, wrangler, workers, pages, kv, deployments, email-routing]
     category: devops
 ---
 
@@ -39,7 +39,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface is read-only v0: `deployments` (recent deployments of the Worker configured in cwd), `pages` (Pages projects), `kv` (KV namespaces), `whoami`.
+Today's surface is read-only v0: `deployments` (recent deployments of the Worker configured in cwd), `pages` (Pages projects), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, via the REST API since wrangler has no Email Routing commands).
 
 ## When cloudflare-axi cannot do it
 
@@ -47,6 +47,9 @@ Today's surface is read-only v0: `deployments` (recent deployments of the Worker
 2. If the error is `VALIDATION_ERROR` with `Unknown command`, or the command
    exists but lacks the flag you need, fall back to raw `wrangler` and finish
    the user's task. Examples: `wrangler pages deployment list --project-name <name>`, `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
+   For products wrangler does not cover (Email Routing writes, DNS records),
+   fall back to the REST API with `curl` and `CLOUDFLARE_API_TOKEN` or the
+   wrangler OAuth token; `cloudflare-axi email --help` says where that token lives.
 3. Then report the gap so it gets wrapped. Search before filing:
 
    ```sh
