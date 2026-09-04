@@ -18,6 +18,14 @@ Early scaffold (v0). Read-only commands only.
 - [wrangler](https://developers.cloudflare.com/workers/wrangler/) installed
   and logged in (`wrangler login`, or `CLOUDFLARE_API_TOKEN` set)
 
+Commands that wrap `wrangler` use whatever credentials `wrangler` uses.
+Commands that call the Cloudflare REST API directly (currently `email`,
+because `wrangler` has no Email Routing surface) use `CLOUDFLARE_API_TOKEN`
+if set, else the OAuth token `wrangler login` stored in its config
+(`~/.wrangler/config/default.toml`, or `~/Library/Preferences/.wrangler/...`
+on macOS). That OAuth token carries the `email_routing` scope by default;
+`wrangler whoami` lists the scopes you have.
+
 ## Install
 
 Not on npm yet, so `npx -y cloudflare-axi` does not work. Install from a clone:
@@ -40,6 +48,10 @@ cloudflare-axi deployments  # recent deployments of the Worker configured in cwd
 cloudflare-axi pages        # all Pages projects in your account
 cloudflare-axi kv           # all Workers KV namespaces in your account
 cloudflare-axi whoami       # logged-in Cloudflare account
+cloudflare-axi email --zone example.com            # Email Routing status, destinations, rules
+cloudflare-axi email dns --zone example.com        # MX/SPF/DKIM Cloudflare expects vs live DNS
+cloudflare-axi email rules --zone example.com      # routing rules incl. catch-all
+cloudflare-axi email addresses                     # account destination addresses + verified state
 cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
 cloudflare-axi update       # self-update (built into axi-sdk-js)

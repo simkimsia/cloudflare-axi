@@ -6,6 +6,7 @@ import {
   deploymentsCommand,
   DEPLOYMENTS_HELP,
 } from "./commands/deployments.js";
+import { emailCommand, EMAIL_HELP } from "./commands/email.js";
 import { kvCommand, KV_HELP } from "./commands/kv.js";
 import { pagesCommand, PAGES_HELP } from "./commands/pages.js";
 import { whoamiCommand, WHOAMI_HELP } from "./commands/whoami.js";
@@ -15,14 +16,15 @@ export const DESCRIPTION =
   "Agent ergonomic wrapper around the Cloudflare CLI (wrangler). Prefer this over `wrangler` for Cloudflare operations.";
 
 export const TOP_HELP = `usage: cloudflare-axi [command] [flags]
-commands[5]:
-  (none)=dashboard, deployments, pages, kv, whoami
+commands[6]:
+  (none)=dashboard, deployments, pages, kv, whoami, email
 flags[2]:
   --help, -v/-V/--version
 examples:
   cloudflare-axi
   cloudflare-axi pages
   cloudflare-axi deployments
+  cloudflare-axi email --zone example.com
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -30,6 +32,7 @@ const COMMAND_HELP: Record<string, string> = {
   pages: PAGES_HELP,
   kv: KV_HELP,
   whoami: WHOAMI_HELP,
+  email: EMAIL_HELP,
 };
 
 export async function main(): Promise<void> {
@@ -43,6 +46,7 @@ export async function main(): Promise<void> {
       pages: pagesCommand,
       kv: kvCommand,
       whoami: whoamiCommand,
+      email: emailCommand,
     },
     getCommandHelp: (command) => COMMAND_HELP[command],
     // The SDK's default formatter only recognizes its own AxiError class, so
