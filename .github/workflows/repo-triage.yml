@@ -2,8 +2,8 @@ name: Repo triage
 
 # Standing triage crewmate. Fetches the eligible issue/PR queue, renders a
 # per-rule VISION.md verdict, and in dry-run mode writes the verdicts to the
-# run summary only. Switch to live by dispatching with mode=live and granting
-# issues: write below. Never merges, closes, or opens PRs.
+# run summary only. Dispatch with mode=live to post the comment and the
+# ready-for-pr label. The cron stays dry-run. Never merges, closes, or opens PRs.
 
 on:
   schedule:
@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      issues: read
+      issues: write
       pull-requests: read
       id-token: write
     steps:
@@ -56,7 +56,7 @@ jobs:
           claude_args: |
             --model ${{ env.TRIAGE_MODEL }}
             --max-turns 40
-            --allowedTools "Read,Glob,Grep,Write,Bash(python3 .claude/skills/repo-triage/scripts/fetch.py:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --allowedTools "Read,Glob,Grep,Write,Bash(python3 .claude/skills/repo-triage/scripts/fetch.py:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"
 
       - name: Publish verdicts to the run summary
         if: always()
