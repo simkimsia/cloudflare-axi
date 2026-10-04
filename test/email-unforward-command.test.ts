@@ -44,9 +44,7 @@ function stubApi(rules: EmailRule[]): Call[] {
       });
       let result: unknown = null;
       if (path.startsWith("/zones?name=")) {
-        result = [
-          { id: ZONE_ID, name: "example.com", account: { id: "acc" } },
-        ];
+        result = [{ id: ZONE_ID, name: "example.com", account: { id: "acc" } }];
       } else if (path.includes("/email/routing/rules?")) {
         result = rules;
       } else if (method === "DELETE") {
@@ -75,7 +73,12 @@ afterEach(() => {
 describe("email unforward command", () => {
   it("DELETEs the rule for a local part and prints what was removed", async () => {
     const calls = stubApi([CATCH_ALL, TEST_RULE]);
-    const out = await emailCommand(["unforward", "test", "--zone", "example.com"]);
+    const out = await emailCommand([
+      "unforward",
+      "test",
+      "--zone",
+      "example.com",
+    ]);
     expect(writes(calls)).toEqual([
       {
         method: "DELETE",
@@ -91,7 +94,12 @@ describe("email unforward command", () => {
 
   it("accepts a full address on the zone", async () => {
     const calls = stubApi([CATCH_ALL, TEST_RULE]);
-    await emailCommand(["unforward", "test@example.com", "--zone", "example.com"]);
+    await emailCommand([
+      "unforward",
+      "test@example.com",
+      "--zone",
+      "example.com",
+    ]);
     expect(writes(calls).map((c) => c.method + " " + c.path)).toEqual([
       `DELETE /zones/${ZONE_ID}/email/routing/rules/t3st`,
     ]);
@@ -99,7 +107,12 @@ describe("email unforward command", () => {
 
   it("is a no-op with changed: false when no rule matches (second run)", async () => {
     const calls = stubApi([CATCH_ALL]);
-    const out = await emailCommand(["unforward", "test", "--zone", "example.com"]);
+    const out = await emailCommand([
+      "unforward",
+      "test",
+      "--zone",
+      "example.com",
+    ]);
     expect(writes(calls)).toEqual([]);
     expect(out).toContain("changed: false");
     expect(out).not.toContain("removed");
@@ -115,7 +128,12 @@ describe("email unforward command", () => {
       ],
     };
     const calls = stubApi([CATCH_ALL, multi]);
-    const out = await emailCommand(["unforward", "test", "--zone", "example.com"]);
+    const out = await emailCommand([
+      "unforward",
+      "test",
+      "--zone",
+      "example.com",
+    ]);
     expect(writes(calls)).toEqual([]);
     expect(out).toContain("changed: false");
   });
