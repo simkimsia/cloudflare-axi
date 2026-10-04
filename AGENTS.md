@@ -138,6 +138,8 @@ real on a throwaway project and delete it afterwards:
   fixtures and never spawn the real binary or touch the network.
 - Conventional commit messages (`feat:`, `fix:`, `docs:`). Releases are cut by
   release-please from these commits and published to npm by trusted publishing.
+  Never hand-edit `CHANGELOG.md` or `.release-please-manifest.json`; release-please
+  owns them and `guard-generated-files.yml` fails PRs that touch them.
 
 ## Maintaining this file
 
