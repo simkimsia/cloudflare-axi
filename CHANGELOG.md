@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.1...cloudflare-axi-v0.2.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* give the remaining flag validation errors a next step ([ee02201](https://github.com/simkimsia/cloudflare-axi/commit/ee02201f5df674c7929debd7528ae55478468ef0))
+
 ## [0.2.1](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.0...cloudflare-axi-v0.2.1) (2026-10-04)
 
 
