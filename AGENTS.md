@@ -119,8 +119,9 @@ real on a throwaway project and delete it afterwards:
   `DELETE .../email/routing/rules/{id}` for `unforward` (the catch-all is
   disabled via PUT instead, since it cannot be deleted). `planForward`
   checks the destination is verified before any write, so 2054 is a
-  fallback. Write paths are unit-tested via the pure planners; only the
-  no-op and validation paths have been run live.
+  fallback. Write paths are unit-tested via the pure planners; live runs
+  cover the no-op and validation paths plus `forward`/`unforward` of a
+  literal rule (2026-10-04), never the catch-all writes.
 - The wrangler OAuth token (default `wrangler login` scopes) works for all of
   the above and for `GET /zones`. It does NOT cover `dns_records` (issue #4):
   that needs a scoped `CLOUDFLARE_API_TOKEN`.
