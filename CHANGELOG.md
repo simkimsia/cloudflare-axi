@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.0...cloudflare-axi-v0.2.1) (2026-10-04)
+
+
+### Features
+
+* **email:** add unforward to delete a routing rule ([32a1859](https://github.com/simkimsia/cloudflare-axi/commit/32a185992f328376d07a04d75818fa0c51b6e582)), closes [#20](https://github.com/simkimsia/cloudflare-axi/issues/20)
+
 ## [0.2.0](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.1.0...cloudflare-axi-v0.2.0) (2026-10-04)
 
 
