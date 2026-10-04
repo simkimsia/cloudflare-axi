@@ -62,7 +62,7 @@ jobs:
               echo "conventional commit message (feat/fix/docs/...). release-please will"
               echo "update these files in the next release PR automatically."
               echo
-              echo "See CONTRIBUTING.md for the full contributor workflow."
+              echo "See AGENTS.md for the contributor workflow."
             } >&2
             exit 1
           fi
