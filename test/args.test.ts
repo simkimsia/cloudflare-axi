@@ -48,6 +48,27 @@ describe("takeFlag", () => {
     );
     expect(() => takeFlag(["--zone="], "--zone")).toThrow(/requires a value/);
   });
+
+  it("gives every missing-value error a next step", () => {
+    for (const argv of [["--zone"], ["--zone", "--other"]]) {
+      try {
+        takeFlag(argv, "--zone");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect((error as AxiError).suggestions).toEqual([
+          "Use `--zone <value>`, or `--zone=<value>` when the value starts with -",
+        ]);
+      }
+    }
+    try {
+      takeFlag(["--zone="], "--zone");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect((error as AxiError).suggestions).toEqual([
+        "Use `--zone <value>` or `--zone=<value>`",
+      ]);
+    }
+  });
 });
 
 describe("takeBoolFlag / takePositional", () => {
@@ -62,6 +83,18 @@ describe("takeBoolFlag / takePositional", () => {
     expect(() =>
       takeBoolFlag(["--commit-dirty=maybe"], "--commit-dirty"),
     ).toThrow(/true or false/);
+  });
+
+  it("tells the agent how to spell a boolean flag", () => {
+    try {
+      takeBoolFlag(["--commit-dirty=maybe"], "--commit-dirty");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect((error as AxiError).code).toBe("VALIDATION_ERROR");
+      expect((error as AxiError).suggestions).toEqual([
+        "Pass `--commit-dirty` alone for true, or `--commit-dirty=false`",
+      ]);
+    }
   });
 
   it("takes the first positional, leaving flags (value flags must be taken first)", () => {

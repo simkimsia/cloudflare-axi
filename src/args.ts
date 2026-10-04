@@ -29,7 +29,9 @@ export function takeFlag(args: string[], flag: string): string | undefined {
     if (arg === flag) {
       const value = args[i + 1];
       if (value === undefined || value.trim() === "" || value.startsWith("-")) {
-        throw new AxiError(`${flag} requires a value`, "VALIDATION_ERROR");
+        throw new AxiError(`${flag} requires a value`, "VALIDATION_ERROR", [
+          `Use \`${flag} <value>\`, or \`${flag}=<value>\` when the value starts with -`,
+        ]);
       }
       args.splice(i, 2);
       return value;
@@ -37,7 +39,9 @@ export function takeFlag(args: string[], flag: string): string | undefined {
     if (arg.startsWith(equalsPrefix)) {
       const value = arg.slice(equalsPrefix.length);
       if (value.trim() === "") {
-        throw new AxiError(`${flag} requires a value`, "VALIDATION_ERROR");
+        throw new AxiError(`${flag} requires a value`, "VALIDATION_ERROR", [
+          `Use \`${flag} <value>\` or \`${flag}=<value>\``,
+        ]);
       }
       args.splice(i, 1);
       return value;
@@ -61,6 +65,7 @@ export function takeBoolFlag(args: string[], flag: string): boolean {
         throw new AxiError(
           `${flag} accepts true or false, got ${value}`,
           "VALIDATION_ERROR",
+          [`Pass \`${flag}\` alone for true, or \`${flag}=false\``],
         );
       }
       args.splice(i, 1);
