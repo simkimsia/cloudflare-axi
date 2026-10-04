@@ -136,8 +136,8 @@ real on a throwaway project and delete it afterwards:
   (import specifiers end in `.js`), Vitest tests in `test/`.
 - Tests are OFFLINE: they feed captured real wrangler output and API JSON as
   fixtures and never spawn the real binary or touch the network.
-- Conventional commit messages (`feat:`, `fix:`, `docs:`) with an eye toward
-  release-please later.
+- Conventional commit messages (`feat:`, `fix:`, `docs:`). Releases are cut by
+  release-please from these commits and published to npm by trusted publishing.
 
 ## Maintaining this file
 
