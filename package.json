@@ -23,7 +23,8 @@
     "dist",
     "skills/cloudflare-axi",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"
