@@ -14,13 +14,13 @@ interface ApiEnvelope<T> {
   result: T;
 }
 
-export type ApiMethod = "GET" | "POST" | "PUT";
+export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export function cfGet<T = unknown>(path: string): Promise<T> {
   return cfRequest<T>("GET", path);
 }
 
-/** Write calls (POST/PUT) send `body` as JSON; same envelope and error mapping as reads. */
+/** Write calls (POST/PUT/DELETE) send `body` as JSON; same envelope and error mapping as reads. */
 export async function cfRequest<T = unknown>(
   method: ApiMethod,
   path: string,
