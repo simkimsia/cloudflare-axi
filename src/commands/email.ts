@@ -297,6 +297,37 @@ export function forwardRuleBody(
       };
 }
 
+/**
+ * The rule's name if a user chose it, else undefined. A name is the default
+ * only when it is exactly what `forwardRuleBody` generates for this target.
+ */
+export function keptRuleName(
+  rule: EmailRule,
+  target: ForwardTarget,
+): string | undefined {
+  if (!rule.name) return undefined;
+  const prefix = `${target.catchAll ? "catch-all" : target.address} to `;
+  const isDefault =
+    rule.name.startsWith(prefix) &&
+    /^[^\s@]+@[^\s@]+$/.test(rule.name.slice(prefix.length));
+  return isDefault ? undefined : rule.name;
+}
+
+/**
+ * PUT body for repointing an existing rule: only the action changes, so a
+ * user-chosen name and a literal rule's priority are carried over.
+ */
+export function updateRuleBody(
+  rule: EmailRule,
+  target: ForwardTarget,
+  destination: string,
+): Omit<EmailRule, "id"> {
+  const body = forwardRuleBody(target, destination, keptRuleName(rule, target));
+  return !target.catchAll && rule.priority !== undefined
+    ? { ...body, priority: rule.priority }
+    : body;
+}
+
 export type DnsRole = "mx" | "spf" | "dkim" | "dmarc" | "txt" | "other";
 
 export function dnsRole(record: EmailDnsRecord): DnsRole {
@@ -700,18 +731,13 @@ async function forwardCommand(
     if (plan.rule.actions.length > 0) {
       previous = `${describeAction(plan.rule)}${plan.rule.enabled ? "" : " (disabled)"}`;
     }
-    // Keep a user-chosen rule name; only default-named rules get renamed.
-    const keepName =
-      plan.rule.name && !/ to [^ ]+@[^ ]+$/.test(plan.rule.name)
-        ? plan.rule.name
-        : undefined;
     const path = target.catchAll
       ? `/zones/${zone.id}/email/routing/rules/catch_all`
       : `/zones/${zone.id}/email/routing/rules/${plan.rule.id}`;
     await cfRequest<EmailRule>(
       "PUT",
       path,
-      forwardRuleBody(target, destination, keepName),
+      updateRuleBody(plan.rule, target, destination),
     );
   }
 

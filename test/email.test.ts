@@ -5,12 +5,14 @@ import {
   dnsRole,
   findRule,
   forwardRuleBody,
+  keptRuleName,
   parseForwardTarget,
   planDestination,
   planForward,
   toAddressRows,
   toDnsRows,
   toRuleRows,
+  updateRuleBody,
   type EmailAddress,
   type EmailDnsRecord,
   type EmailRule,
@@ -304,5 +306,74 @@ describe("email write planners", () => {
       name: "kept name",
       matchers: [{ type: "literal", field: "to", value: "hello@example.com" }],
     });
+  });
+
+  const hello = { catchAll: false as const, address: "hello@example.com" };
+  const literalRule = (
+    name: string | undefined,
+    priority?: number,
+  ): EmailRule => ({
+    id: "r1",
+    name,
+    enabled: true,
+    priority,
+    matchers: [{ type: "literal", field: "to", value: "hello@example.com" }],
+    actions: [{ type: "forward", value: ["old@b.example"] }],
+  });
+
+  it("keptRuleName drops only the name forwardRuleBody would generate", () => {
+    expect(
+      keptRuleName(literalRule("hello@example.com to old@b.example"), hello),
+    ).toBeUndefined();
+    expect(keptRuleName(literalRule("Sales team to bob@corp.com"), hello)).toBe(
+      "Sales team to bob@corp.com",
+    );
+    expect(
+      keptRuleName(literalRule("other@example.com to old@b.example"), hello),
+    ).toBe("other@example.com to old@b.example");
+    expect(keptRuleName(literalRule(undefined), hello)).toBeUndefined();
+    expect(
+      keptRuleName(
+        { ...literalRule("catch-all to old@b.example") },
+        { catchAll: true },
+      ),
+    ).toBeUndefined();
+    expect(keptRuleName(literalRule("catch-all to old@b.example"), hello)).toBe(
+      "catch-all to old@b.example",
+    );
+  });
+
+  it("updateRuleBody keeps a literal rule's priority and user-chosen name", () => {
+    expect(
+      updateRuleBody(
+        literalRule("Sales team to bob@corp.com", 5),
+        hello,
+        "a@b.example",
+      ),
+    ).toEqual({
+      name: "Sales team to bob@corp.com",
+      enabled: true,
+      priority: 5,
+      matchers: [{ type: "literal", field: "to", value: "hello@example.com" }],
+      actions: [{ type: "forward", value: ["a@b.example"] }],
+    });
+    expect(
+      updateRuleBody(
+        literalRule("hello@example.com to old@b.example"),
+        hello,
+        "a@b.example",
+      ),
+    ).not.toHaveProperty("priority");
+    const catchAll: EmailRule = {
+      id: "catch_all",
+      name: "catch-all to old@b.example",
+      enabled: true,
+      priority: 2147483647,
+      matchers: [{ type: "all" }],
+      actions: [{ type: "forward", value: ["old@b.example"] }],
+    };
+    expect(updateRuleBody(catchAll, { catchAll: true }, "a@b.example")).toEqual(
+      forwardRuleBody({ catchAll: true }, "a@b.example"),
+    );
   });
 });
