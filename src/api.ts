@@ -1,5 +1,10 @@
 import { resolveApiCredentials } from "./credentials.js";
-import { AxiError, mapApiError, type ApiErrorEntry } from "./errors.js";
+import {
+  AxiError,
+  mapApiError,
+  REPORT_SUGGESTION,
+  type ApiErrorEntry,
+} from "./errors.js";
 
 /**
  * Sole place that talks to the Cloudflare REST API directly. Used only for
@@ -59,6 +64,7 @@ export async function cfRequest<T = unknown>(
     throw new AxiError(
       `Unexpected Cloudflare API response (HTTP ${response.status}): ${text.slice(0, 200)}`,
       "UNKNOWN",
+      [REPORT_SUGGESTION],
     );
   }
   if (!response.ok || envelope.success === false) {

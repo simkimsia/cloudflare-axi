@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import {
   AxiError,
   mapWranglerError,
+  UNKNOWN_SUGGESTION,
   wranglerNotInstalledError,
 } from "./errors.js";
 
@@ -60,6 +61,7 @@ export async function wranglerJson<T = unknown>(args: string[]): Promise<T> {
     throw new AxiError(
       `Unexpected wrangler output: ${result.stdout.slice(0, 200)}`,
       "UNKNOWN",
+      [UNKNOWN_SUGGESTION],
     );
   }
 }
