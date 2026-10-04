@@ -108,6 +108,12 @@ pnpm run build        # tsc -> dist/
 pnpm run format:check
 ```
 
+## Changelog
+
+Release notes live in [CHANGELOG.md](CHANGELOG.md) and on [GitHub Releases](https://github.com/simkimsia/cloudflare-axi/releases).
+release-please writes both from conventional commits, so do not edit the file by hand.
+Breaking changes, such as a renamed error code, are listed under "⚠ BREAKING CHANGES" and bump the minor version while below 1.0.
+
 ## License
 
 MIT
