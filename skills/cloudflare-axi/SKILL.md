@@ -5,7 +5,17 @@ user-invocable: false
 author: KimSia Sim (simkimsia)
 metadata:
   hermes:
-    tags: [cloudflare, wrangler, workers, pages, kv, deployments, email-routing]
+    tags:
+      [
+        cloudflare,
+        wrangler,
+        workers,
+        pages,
+        kv,
+        deployments,
+        email-routing,
+        dns,
+      ]
     category: devops
 ---
 
@@ -34,7 +44,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`), and `dns` (list a `--zone`'s records, `dns set <type> <name> <content>` to create or update one; needs a `CLOUDFLARE_API_TOKEN` with Zone > DNS permissions because the `wrangler login` token has no DNS scope).
 
 ## When cloudflare-axi cannot do it
 
@@ -42,7 +52,7 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
 2. If the error is `VALIDATION_ERROR` with `Unknown command`, or the command
    exists but lacks the flag you need, fall back to raw `wrangler` and finish
    the user's task. Examples: `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
-   For products wrangler does not cover (Email Routing writes, DNS records),
+   For products wrangler does not cover (e.g. DNS record types `dns set` does not take),
    fall back to the REST API with `curl` and `CLOUDFLARE_API_TOKEN` or the
    wrangler OAuth token; `cloudflare-axi email --help` says where that token lives.
 3. Then report the gap so it gets wrapped. Search before filing:

@@ -123,8 +123,16 @@ real on a throwaway project and delete it afterwards:
   cover the no-op and validation paths plus `forward`/`unforward` of a
   literal rule (2026-10-04), never the catch-all writes.
 - The wrangler OAuth token (default `wrangler login` scopes) works for all of
-  the above and for `GET /zones`. It does NOT cover `dns_records` (issue #4):
-  that needs a scoped `CLOUDFLARE_API_TOKEN`.
+  the above and for `GET /zones`. It does NOT cover `dns_records` (issue #4,
+  10000 Authentication error): that needs a `CLOUDFLARE_API_TOKEN` with
+  Zone > DNS. `dnsAuthError` in `src/commands/dns.ts` rewrites the AUTH help
+  to say so instead of the generic "re-run wrangler login".
+- DNS (`src/commands/dns.ts`): `GET /zones/{zone}/dns_records?type=&name=`,
+  `POST .../dns_records`, `PATCH .../dns_records/{id}` (PATCH so comment and
+  tags survive). Shapes follow the API docs; the happy path has NOT been run
+  live yet (no scoped token at hand), only the AUTH and validation paths.
+  `planSet` matches on (type, name), narrows TXT by its `v=` tag, and refuses
+  rather than guesses when several records still match (`--id` picks one).
 - Error envelopes: `{"success":false,"errors":[{"code":N,"message":...}]}`.
   Seen: 10000 Authentication error (HTTP 403, also for a zone the token
   cannot see), 6003/6111 bad Authorization header (HTTP 400), 9109 Invalid

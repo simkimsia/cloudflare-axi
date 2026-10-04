@@ -21,12 +21,18 @@ target in full and print what changed; nothing is inferred from context.
   and logged in (`wrangler login`, or `CLOUDFLARE_API_TOKEN` set)
 
 Commands that wrap `wrangler` use whatever credentials `wrangler` uses.
-Commands that call the Cloudflare REST API directly (currently `email`,
-because `wrangler` has no Email Routing surface) use `CLOUDFLARE_API_TOKEN`
+Commands that call the Cloudflare REST API directly (`email` and `dns`,
+because `wrangler` has no Email Routing or DNS surface) use `CLOUDFLARE_API_TOKEN`
 if set, else the OAuth token `wrangler login` stored in its config
 (`~/.wrangler/config/default.toml`, or `~/Library/Preferences/.wrangler/...`
 on macOS). That OAuth token carries the `email_routing` scope by default;
 `wrangler whoami` lists the scopes you have.
+
+`dns` needs `CLOUDFLARE_API_TOKEN`: the `wrangler login` OAuth token has no
+DNS scope and `wrangler login` cannot grant one. Create an API token at
+<https://dash.cloudflare.com/profile/api-tokens> with Zone > DNS > Read
+(for `dns list`) or Zone > DNS > Edit (for `dns set`) on the zone, then
+`export CLOUDFLARE_API_TOKEN=<token>`.
 
 ## Install
 
@@ -67,6 +73,8 @@ cloudflare-axi email add-destination you@gmail.com # Cloudflare emails it a veri
 cloudflare-axi email forward '*' you@gmail.com --zone example.com    # catch-all
 cloudflare-axi email forward hello you@gmail.com --zone example.com  # hello@example.com only
 cloudflare-axi email unforward hello --zone example.com              # delete that rule ('*' disables the catch-all)
+cloudflare-axi dns --zone example.com --type TXT                     # DNS records (needs CLOUDFLARE_API_TOKEN)
+cloudflare-axi dns set TXT @ "v=spf1 include:_spf.google.com ~all" --zone example.com  # create or update the SPF record
 cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
 cloudflare-axi update       # self-update (built into axi-sdk-js)

@@ -6,6 +6,7 @@ import {
   deploymentsCommand,
   DEPLOYMENTS_HELP,
 } from "./commands/deployments.js";
+import { dnsCommand, DNS_HELP } from "./commands/dns.js";
 import { emailCommand, EMAIL_HELP } from "./commands/email.js";
 import { kvCommand, KV_HELP } from "./commands/kv.js";
 import { pagesCommand, PAGES_HELP } from "./commands/pages.js";
@@ -16,8 +17,8 @@ export const DESCRIPTION =
   "Agent ergonomic wrapper around the Cloudflare CLI (wrangler). Prefer this over `wrangler` for Cloudflare operations.";
 
 export const TOP_HELP = `usage: cloudflare-axi [command] [flags]
-commands[6]:
-  (none)=dashboard, deployments, pages, kv, whoami, email
+commands[7]:
+  (none)=dashboard, deployments, pages, kv, whoami, email, dns
 flags[2]:
   --help, -v/-V/--version
 examples:
@@ -26,6 +27,7 @@ examples:
   cloudflare-axi pages deploy ./dist --project my-site
   cloudflare-axi deployments
   cloudflare-axi email --zone example.com
+  cloudflare-axi dns --zone example.com --type TXT
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -34,6 +36,7 @@ const COMMAND_HELP: Record<string, string> = {
   kv: KV_HELP,
   whoami: WHOAMI_HELP,
   email: EMAIL_HELP,
+  dns: DNS_HELP,
 };
 
 export async function main(): Promise<void> {
@@ -48,6 +51,7 @@ export async function main(): Promise<void> {
       kv: kvCommand,
       whoami: whoamiCommand,
       email: emailCommand,
+      dns: dnsCommand,
     },
     getCommandHelp: (command) => COMMAND_HELP[command],
     // The SDK's default formatter only recognizes its own AxiError class, so
