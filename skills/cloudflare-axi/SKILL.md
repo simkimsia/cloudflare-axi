@@ -17,14 +17,9 @@ raw `wrangler` for Cloudflare operations: TOON output, structured errors with
 
 ## Setup
 
-cloudflare-axi is not on npm yet. Run it from a clone:
-
-```sh
-git clone https://github.com/simkimsia/cloudflare-axi
-pnpm --prefix cloudflare-axi install
-pnpm --prefix cloudflare-axi run build
-pnpm --prefix cloudflare-axi link --global   # puts `cloudflare-axi` on PATH
-```
+Install with `pnpm add -g @simkimsia/cloudflare-axi`, or run it without installing
+via `npx -y @simkimsia/cloudflare-axi`. The README's Install section covers working
+from a clone.
 
 It wraps [`wrangler`](https://developers.cloudflare.com/workers/wrangler/), which must be installed and logged in
 (`wrangler login, or set CLOUDFLARE_API_TOKEN`). If a command fails with `WRANGLER_NOT_INSTALLED`, ask the user to
