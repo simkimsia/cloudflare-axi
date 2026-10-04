@@ -37,6 +37,8 @@ jobs:
       - run: pnpm run build
         if: ${{ steps.release.outputs.release_created }}
 
+      # Trusted publishing (OIDC, no NPM_TOKEN) needs npm >= 11.5.1; the Node 24
+      # in the runner tool cache may bundle an older npm.
       - run: npm install -g npm@11
         if: ${{ steps.release.outputs.release_created }}
 
