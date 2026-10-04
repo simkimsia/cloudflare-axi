@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapApiError } from "../src/errors.js";
+import { mapApiError, REPORT_SUGGESTION } from "../src/errors.js";
 
 // Real api.cloudflare.com envelopes captured live 2026-09-04.
 const AUTH_10000 = [
@@ -50,6 +50,7 @@ describe("mapApiError", () => {
     const err = mapApiError(400, [{ code: 2999, message: "Something odd" }]);
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toBe("Something odd [code: 2999]");
+    expect(err.suggestions).toEqual([REPORT_SUGGESTION]);
   });
 
   it("reports the HTTP status when the envelope has no errors", () => {

@@ -3,6 +3,7 @@ import {
   exitCodeForError,
   mapWranglerError,
   stripAnsi,
+  UNKNOWN_SUGGESTION,
 } from "../src/errors.js";
 
 // Real wrangler 4.127.1 stderr, ANSI escapes included, captured live.
@@ -119,6 +120,7 @@ describe("mapWranglerError", () => {
     const err = mapWranglerError(ERR("Something exploded") + "\nstack line", 1);
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toBe("Something exploded");
+    expect(err.suggestions).toEqual([UNKNOWN_SUGGESTION]);
   });
 
   it("prefers the API detail line over the generic request preamble", () => {
