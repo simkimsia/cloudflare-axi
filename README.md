@@ -66,6 +66,7 @@ cloudflare-axi email enable --zone example.com     # turn on Email Routing (adds
 cloudflare-axi email add-destination you@gmail.com # Cloudflare emails it a verification link
 cloudflare-axi email forward '*' you@gmail.com --zone example.com    # catch-all
 cloudflare-axi email forward hello you@gmail.com --zone example.com  # hello@example.com only
+cloudflare-axi email unforward hello --zone example.com              # delete that rule ('*' disables the catch-all)
 cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
 cloudflare-axi update       # self-update (built into axi-sdk-js)

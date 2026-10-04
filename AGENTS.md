@@ -115,7 +115,9 @@ real on a throwaway project and delete it afterwards:
   existing unverified address is reported, never re-posted),
   `PUT .../email/routing/rules/catch_all` (the catch-all always exists, so
   it is never POSTed), `POST .../email/routing/rules` and
-  `PUT .../email/routing/rules/{id}` for literal `to` rules. `planForward`
+  `PUT .../email/routing/rules/{id}` for literal `to` rules, and
+  `DELETE .../email/routing/rules/{id}` for `unforward` (the catch-all is
+  disabled via PUT instead, since it cannot be deleted). `planForward`
   checks the destination is verified before any write, so 2054 is a
   fallback. Write paths are unit-tested via the pure planners; only the
   no-op and validation paths have been run live.

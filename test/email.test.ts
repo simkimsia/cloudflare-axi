@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertEmail,
   checkLiveDns,
+  disabledCatchAllBody,
   dnsRole,
   findRule,
   forwardRuleBody,
@@ -9,6 +10,7 @@ import {
   parseForwardTarget,
   planDestination,
   planForward,
+  planUnforward,
   toAddressRows,
   toDnsRows,
   toRuleRows,
@@ -375,5 +377,55 @@ describe("email write planners", () => {
     expect(updateRuleBody(catchAll, { catchAll: true }, "a@b.example")).toEqual(
       forwardRuleBody({ catchAll: true }, "a@b.example"),
     );
+  });
+});
+
+describe("email unforward planner", () => {
+  it("deletes the rule that routes the named address", () => {
+    expect(
+      planUnforward(RULES, { catchAll: false, address: "hello@example.com" }),
+    ).toMatchObject({ kind: "delete", rule: { id: "d4a1" } });
+  });
+
+  it("is a no-op when no rule routes the address on its own", () => {
+    expect(
+      planUnforward(RULES, { catchAll: false, address: "sales@example.com" }),
+    ).toEqual({ kind: "noop" });
+    const multi: EmailRule = {
+      id: "m",
+      enabled: true,
+      matchers: [
+        { type: "literal", field: "to", value: "sales@example.com" },
+        { type: "literal", field: "from", value: "boss@corp.example" },
+      ],
+      actions: [{ type: "drop" }],
+    };
+    expect(
+      planUnforward([multi], {
+        catchAll: false,
+        address: "sales@example.com",
+      }),
+    ).toEqual({ kind: "noop" });
+  });
+
+  it("disables an enabled catch-all and no-ops a disabled one", () => {
+    expect(planUnforward(RULES, { catchAll: true })).toMatchObject({
+      kind: "disable",
+      rule: { id: "a27d" },
+    });
+    const off = RULES.map((r) =>
+      r.id === "a27d" ? { ...r, enabled: false } : r,
+    );
+    expect(planUnforward(off, { catchAll: true })).toEqual({ kind: "noop" });
+    expect(planUnforward([], { catchAll: true })).toEqual({ kind: "noop" });
+  });
+
+  it("disabledCatchAllBody keeps the name and action, flips enabled", () => {
+    expect(disabledCatchAllBody(RULES[0])).toEqual({
+      name: "catch-all to gmail",
+      enabled: false,
+      matchers: [{ type: "all" }],
+      actions: [{ type: "forward", value: ["inbox@gmail.example"] }],
+    });
   });
 });

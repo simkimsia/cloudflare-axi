@@ -13,9 +13,9 @@ import { resolveAccountId, resolveZone, type ZoneRef } from "../zones.js";
 
 export const EMAIL_HELP = `usage: cloudflare-axi email [subcommand] --zone <domain|zone-id>
 Email Routing for a zone via the Cloudflare REST API (wrangler has no Email Routing surface).
-subcommands[7]:
+subcommands[8]:
   read: (none)=routing status + destination addresses + rules, dns, addresses, rules
-  write: enable, add-destination <email>, forward <local-part|*> <destination>
+  write: enable, add-destination <email>, forward <local-part|*> <destination>, unforward <local-part|*>
 flags[1]:
   --zone <domain|zone-id>  apex domain (one lookup) or 32-hex zone id; required except for \`addresses\` and \`add-destination\`
 auth: CLOUDFLARE_API_TOKEN if set, else the OAuth token from \`wrangler login\` (needs the email_routing scope; \`wrangler whoami\` lists scopes)
@@ -26,6 +26,7 @@ notes:
   \`add-destination\` makes Cloudflare email a verification link; a destination forwards only after it is clicked. Already listed = no-op
   \`forward '*' <dest>\` sets the catch-all; \`forward hello <dest>\` routes hello@<zone> (a full address on the zone also works). An existing rule for that address is replaced and the old action printed
   \`forward\` checks the destination is listed and verified before calling the API
+  \`unforward hello\` deletes the rule for hello@<zone>; \`unforward '*'\` disables the catch-all (it cannot be deleted), so unmatched mail is rejected. No matching rule = no-op. The removed action is printed
 examples:
   cloudflare-axi email --zone example.com
   cloudflare-axi email dns --zone example.com
@@ -35,10 +36,11 @@ examples:
   cloudflare-axi email add-destination you@gmail.com --zone example.com
   cloudflare-axi email forward '*' you@gmail.com --zone example.com
   cloudflare-axi email forward hello you@gmail.com --zone example.com
+  cloudflare-axi email unforward hello --zone example.com
 `;
 
 const USAGE =
-  "cloudflare-axi email [dns|addresses|rules|enable|add-destination <email>|forward <local-part|*> <destination>] --zone <domain|zone-id>";
+  "cloudflare-axi email [dns|addresses|rules|enable|add-destination <email>|forward <local-part|*> <destination>|unforward <local-part|*>] --zone <domain|zone-id>";
 
 // ---- API shapes (verified live against api.cloudflare.com, 2026-09-04) ----
 
@@ -326,6 +328,40 @@ export function updateRuleBody(
   return !target.catchAll && rule.priority !== undefined
     ? { ...body, priority: rule.priority }
     : body;
+}
+
+export type UnforwardPlan =
+  | { kind: "noop" }
+  | { kind: "delete"; rule: EmailRule }
+  | { kind: "disable"; rule: EmailRule };
+
+/**
+ * Only a rule that matches the named address alone is deleted; a rule with
+ * several matchers is left for the dashboard. The catch-all always exists,
+ * so unforwarding it means disabling it.
+ */
+export function planUnforward(
+  rules: EmailRule[],
+  target: ForwardTarget,
+): UnforwardPlan {
+  const rule = findRule(rules, target);
+  if (!rule) return { kind: "noop" };
+  if (target.catchAll) {
+    return rule.enabled ? { kind: "disable", rule } : { kind: "noop" };
+  }
+  return { kind: "delete", rule };
+}
+
+/** PUT body that turns the catch-all off while keeping its name and action. */
+export function disabledCatchAllBody(
+  rule: EmailRule,
+): Omit<EmailRule, "id" | "priority"> {
+  return {
+    ...(rule.name ? { name: rule.name } : {}),
+    enabled: false,
+    matchers: [{ type: "all" }],
+    actions: rule.actions,
+  };
 }
 
 export type DnsRole = "mx" | "spf" | "dkim" | "dmarc" | "txt" | "other";
@@ -767,6 +803,63 @@ async function forwardCommand(
   ]);
 }
 
+async function unforwardCommand(
+  zone: ZoneRef,
+  targetArg: string,
+): Promise<string> {
+  const target = parseForwardTarget(targetArg, zone.name);
+  const rules = await fetchRules(zone);
+  const plan = planUnforward(rules, target);
+  const matchLabel = target.catchAll ? "all (catch-all)" : target.address;
+
+  if (plan.kind === "delete") {
+    await cfRequest<EmailRule>(
+      "DELETE",
+      `/zones/${zone.id}/email/routing/rules/${plan.rule.id}`,
+    );
+  } else if (plan.kind === "disable") {
+    await cfRequest<EmailRule>(
+      "PUT",
+      `/zones/${zone.id}/email/routing/rules/catch_all`,
+      disabledCatchAllBody(plan.rule),
+    );
+  }
+
+  const hints: string[] = [];
+  if (plan.kind === "noop") {
+    hints.push(
+      target.catchAll
+        ? "The catch-all is already disabled; nothing changed"
+        : `No rule routes ${target.address} on its own; nothing changed`,
+    );
+  } else if (plan.kind === "disable") {
+    hints.push(
+      `Mail to ${zone.name} addresses without their own rule is now rejected; run \`cloudflare-axi email forward '*' <destination> --zone ${zone.name}\` to restore it`,
+    );
+  } else if (rules.some((r) => isCatchAll(r) && r.enabled)) {
+    hints.push(`Mail to ${matchLabel} now falls through to the catch-all`);
+  }
+  hints.push(
+    `Run \`cloudflare-axi email rules --zone ${zone.name}\` to see every rule in order`,
+  );
+  return renderOutput([
+    encode({
+      zone: zone.name,
+      changed: plan.kind !== "noop",
+      match: matchLabel,
+      ...(plan.kind === "noop"
+        ? {}
+        : {
+            removed:
+              plan.kind === "delete"
+                ? `${describeAction(plan.rule)}${plan.rule.enabled ? "" : " (disabled)"}`
+                : `${describeAction(plan.rule)} (catch-all now disabled)`,
+          }),
+    }),
+    renderHelp(hints),
+  ]);
+}
+
 const SUBCOMMANDS = [
   "dns",
   "addresses",
@@ -774,6 +867,7 @@ const SUBCOMMANDS = [
   "enable",
   "add-destination",
   "forward",
+  "unforward",
 ] as const;
 type EmailSubcommand = (typeof SUBCOMMANDS)[number];
 
@@ -789,7 +883,12 @@ export async function emailCommand(args: string[]): Promise<string> {
     );
   }
   const positionals: string[] = [];
-  const arity = sub === "add-destination" ? 1 : sub === "forward" ? 2 : 0;
+  const arity =
+    sub === "add-destination" || sub === "unforward"
+      ? 1
+      : sub === "forward"
+        ? 2
+        : 0;
   for (let i = 0; i < arity; i++) {
     const value = takePositional(rest);
     if (value === undefined) break;
@@ -800,12 +899,16 @@ export async function emailCommand(args: string[]): Promise<string> {
     throw new AxiError(
       sub === "forward"
         ? "forward needs <local-part|*> and <destination>"
-        : "add-destination needs an <email>",
+        : sub === "unforward"
+          ? "unforward needs <local-part|*>"
+          : "add-destination needs an <email>",
       "VALIDATION_ERROR",
       [
         sub === "forward"
           ? "cloudflare-axi email forward <local-part|*> <destination> --zone <domain>"
-          : "cloudflare-axi email add-destination <email> [--zone <domain>]",
+          : sub === "unforward"
+            ? "cloudflare-axi email unforward <local-part|*> --zone <domain>"
+            : "cloudflare-axi email add-destination <email> [--zone <domain>]",
       ],
     );
   }
@@ -834,6 +937,8 @@ export async function emailCommand(args: string[]): Promise<string> {
       return enableCommand(zone);
     case "forward":
       return forwardCommand(zone, positionals[0], destination!);
+    case "unforward":
+      return unforwardCommand(zone, positionals[0]);
     case "dns":
       return dnsCommand(zone);
     case "rules":
