@@ -23,7 +23,7 @@ from a clone.
 
 It wraps [`wrangler`](https://developers.cloudflare.com/workers/wrangler/), which must be installed and logged in
 (`wrangler login, or set CLOUDFLARE_API_TOKEN`). If a command fails with `WRANGLER_NOT_INSTALLED`, ask the user to
-install `wrangler`. `NOT_CONFIGURED` means no Worker config (wrangler.toml / wrangler.jsonc) in the current directory; run from the Worker's directory or use `pages` / `kv` which do not need one.
+install `wrangler`. `NOT_LINKED` means no Worker config (wrangler.toml / wrangler.jsonc) in the current directory; run from the Worker's directory or use `pages` / `kv` which do not need one.
 
 ## Current guidance lives in the CLI
 

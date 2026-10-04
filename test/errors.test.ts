@@ -86,9 +86,9 @@ describe("mapWranglerError", () => {
     expect(err.code).toBe("AUTH");
   });
 
-  it("maps a missing Worker name to NOT_CONFIGURED with a config suggestion", () => {
+  it("maps a missing Worker name to NOT_LINKED with a config suggestion", () => {
     const err = mapWranglerError(NO_WORKER_NAME_STDERR, 1);
-    expect(err.code).toBe("NOT_CONFIGURED");
+    expect(err.code).toBe("NOT_LINKED");
     expect(err.suggestions.join(" ")).toContain("wrangler config");
   });
 

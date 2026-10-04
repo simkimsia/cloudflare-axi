@@ -1,6 +1,6 @@
 export type ErrorCode =
   | "AUTH"
-  | "NOT_CONFIGURED"
+  | "NOT_LINKED"
   | "NOT_FOUND"
   | "ALREADY_EXISTS"
   | "VALIDATION_ERROR"
@@ -113,7 +113,7 @@ const patterns: ErrorPattern[] = [
     // for your Worker. Either pass it as a cli arg with `--name <name>` or in
     // your configuration file as `name = \"<name>\"`".
     pattern: /You need to provide a name for your Worker/i,
-    code: "NOT_CONFIGURED",
+    code: "NOT_LINKED",
     message: "No Worker is configured in this directory",
     suggestions: [
       "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
