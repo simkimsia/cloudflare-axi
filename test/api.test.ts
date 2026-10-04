@@ -35,14 +35,21 @@ describe("mapApiError", () => {
     ).toBe("NOT_FOUND");
   });
 
-  it("falls back to UNKNOWN with the message and code", () => {
+  it("maps code 2054 (unverified destination) to UNVERIFIED with a next step", () => {
     const err = mapApiError(400, [
       { code: 2054, message: "Destination address is not verified" },
     ]);
-    expect(err.code).toBe("UNKNOWN");
+    expect(err.code).toBe("UNVERIFIED");
     expect(err.message).toBe(
       "Destination address is not verified [code: 2054]",
     );
+    expect(err.suggestions.join(" ")).toContain("verification link");
+  });
+
+  it("falls back to UNKNOWN with the message and code", () => {
+    const err = mapApiError(400, [{ code: 2999, message: "Something odd" }]);
+    expect(err.code).toBe("UNKNOWN");
+    expect(err.message).toBe("Something odd [code: 2999]");
   });
 
   it("reports the HTTP status when the envelope has no errors", () => {

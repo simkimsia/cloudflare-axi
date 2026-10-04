@@ -14,12 +14,30 @@ interface ApiEnvelope<T> {
   result: T;
 }
 
-export async function cfGet<T = unknown>(path: string): Promise<T> {
+export type ApiMethod = "GET" | "POST" | "PUT";
+
+export function cfGet<T = unknown>(path: string): Promise<T> {
+  return cfRequest<T>("GET", path);
+}
+
+/** Write calls (POST/PUT) send `body` as JSON; same envelope and error mapping as reads. */
+export async function cfRequest<T = unknown>(
+  method: ApiMethod,
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const { token } = await resolveApiCredentials();
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -31,20 +49,20 @@ export async function cfGet<T = unknown>(path: string): Promise<T> {
   }
 
   const text = await response.text();
-  let body: ApiEnvelope<T> | undefined;
+  let envelope: ApiEnvelope<T> | undefined;
   try {
-    body = JSON.parse(text) as ApiEnvelope<T>;
+    envelope = JSON.parse(text) as ApiEnvelope<T>;
   } catch {
-    body = undefined;
+    envelope = undefined;
   }
-  if (!body || typeof body !== "object") {
+  if (!envelope || typeof envelope !== "object") {
     throw new AxiError(
       `Unexpected Cloudflare API response (HTTP ${response.status}): ${text.slice(0, 200)}`,
       "UNKNOWN",
     );
   }
-  if (!response.ok || body.success === false) {
-    throw mapApiError(response.status, body.errors ?? [], path);
+  if (!response.ok || envelope.success === false) {
+    throw mapApiError(response.status, envelope.errors ?? [], path);
   }
-  return body.result;
+  return envelope.result;
 }

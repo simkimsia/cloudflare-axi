@@ -108,13 +108,25 @@ real on a throwaway project and delete it afterwards:
   the catch-all as a rule with matcher `{type: "all"}` and priority
   2147483647), `GET /accounts/{account}/email/routing/addresses`
   (`status: verified|unverified`, `verified` timestamp or null).
+- Email Routing writes (from the 2026-09-03 manual setup, issue #2):
+  `POST /zones/{zone}/email/routing/enable` (body `{}`; adds MX/SPF/DKIM
+  when DNS is on Cloudflare), `POST /accounts/{account}/email/routing/addresses`
+  `{email}` (sends the verification mail; there is no resend endpoint, so an
+  existing unverified address is reported, never re-posted),
+  `PUT .../email/routing/rules/catch_all` (the catch-all always exists, so
+  it is never POSTed), `POST .../email/routing/rules` and
+  `PUT .../email/routing/rules/{id}` for literal `to` rules. `planForward`
+  checks the destination is verified before any write, so 2054 is a
+  fallback. Write paths are unit-tested via the pure planners; only the
+  no-op and validation paths have been run live.
 - The wrangler OAuth token (default `wrangler login` scopes) works for all of
   the above and for `GET /zones`. It does NOT cover `dns_records` (issue #4):
   that needs a scoped `CLOUDFLARE_API_TOKEN`.
 - Error envelopes: `{"success":false,"errors":[{"code":N,"message":...}]}`.
   Seen: 10000 Authentication error (HTTP 403, also for a zone the token
   cannot see), 6003/6111 bad Authorization header (HTTP 400), 9109 Invalid
-  zone identifier, 2054 Destination address is not verified (write side).
+  zone identifier, 2054 Destination address is not verified (write side,
+  mapped to `UNVERIFIED`).
 - `email dns` also resolves live DNS via `node:dns` to report `ok` /
   `missing` / `differs` per record; tests inject a fake resolver.
 

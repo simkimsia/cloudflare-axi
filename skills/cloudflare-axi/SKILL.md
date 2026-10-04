@@ -34,7 +34,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, via the REST API since wrangler has no Email Routing commands).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, and `forward <local-part|*> <destination>`, via the REST API since wrangler has no Email Routing commands; all three writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
 
 ## When cloudflare-axi cannot do it
 
