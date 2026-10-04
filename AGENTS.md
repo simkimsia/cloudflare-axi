@@ -78,8 +78,8 @@ the upstream `kunchenguid/axi` repo).
   defaults to `main` on the wrangler side too.
 - `wrangler deployments list` is directory-scoped: it needs a Worker name
   from a wrangler config in cwd (or `--name`); without one it fails with
-  "You need to provide a name for your Worker" → mapped to `NOT_CONFIGURED`
-  (the analog of railway-axi's `NOT_LINKED`). `pages`/`kv` are account-scoped.
+  "You need to provide a name for your Worker" → mapped to `NOT_LINKED`
+  (same code as railway-axi and netlify-axi). `pages`/`kv` are account-scoped.
 - Error stderr is ANSI-colored and shaped like
   `✘ [ERROR] A request to the Cloudflare API (...) failed.` followed by an
   indented detail line such as `Authentication error [code: 10000]` or
