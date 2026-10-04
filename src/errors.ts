@@ -20,7 +20,7 @@ export class AxiError extends Error {
   }
 }
 
-export function exitCodeForError(error: AxiError): number {
+export function exitCodeForError(error: { code: string }): number {
   return error.code === "VALIDATION_ERROR" ? 2 : 1;
 }
 
@@ -145,8 +145,16 @@ export function mapWranglerError(stderr: string, exitCode: number): AxiError {
   return new AxiError(
     errorLine(trimmed) || `wrangler exited with code ${exitCode}`,
     "UNKNOWN",
+    [UNKNOWN_SUGGESTION],
   );
 }
+
+export const UNKNOWN_SUGGESTION =
+  "Rerun the same command with plain `wrangler` to see its full output, then report the gap at https://github.com/simkimsia/cloudflare-axi/issues";
+
+/** For REST API failures, which have no plain `wrangler` command to rerun. */
+export const REPORT_SUGGESTION =
+  "Report the gap at https://github.com/simkimsia/cloudflare-axi/issues";
 
 /**
  * First meaningful line of wrangler stderr, with the "✘ [ERROR]" marker
@@ -240,5 +248,5 @@ export function mapApiError(
       "Wait a moment and retry",
     ]);
   }
-  return new AxiError(detail, "UNKNOWN");
+  return new AxiError(detail, "UNKNOWN", [REPORT_SUGGESTION]);
 }
