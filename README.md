@@ -62,6 +62,10 @@ cloudflare-axi email --zone example.com            # Email Routing status, desti
 cloudflare-axi email dns --zone example.com        # MX/SPF/DKIM Cloudflare expects vs live DNS
 cloudflare-axi email rules --zone example.com      # routing rules incl. catch-all
 cloudflare-axi email addresses                     # account destination addresses + verified state
+cloudflare-axi email enable --zone example.com     # turn on Email Routing (adds MX/SPF/DKIM when DNS is on Cloudflare)
+cloudflare-axi email add-destination you@gmail.com # Cloudflare emails it a verification link
+cloudflare-axi email forward '*' you@gmail.com --zone example.com    # catch-all
+cloudflare-axi email forward hello you@gmail.com --zone example.com  # hello@example.com only
 cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
 cloudflare-axi update       # self-update (built into axi-sdk-js)

@@ -3,6 +3,7 @@ export type ErrorCode =
   | "NOT_LINKED"
   | "NOT_FOUND"
   | "ALREADY_EXISTS"
+  | "UNVERIFIED"
   | "VALIDATION_ERROR"
   | "WRANGLER_NOT_INSTALLED"
   | "UNKNOWN";
@@ -182,6 +183,9 @@ const API_AUTH_CODES = new Set([10000, 6003, 6111, 10001]);
 // 7003 Could not route to <path>, 1001 resource not found, 9109 Invalid zone
 // identifier (a 32-hex id that matches no zone).
 const API_NOT_FOUND_CODES = new Set([7003, 1001, 9109]);
+// 2054 "Destination address is not verified" (seen live 2026-09-03 when
+// creating a forward rule before the destination clicked its link).
+const API_UNVERIFIED_CODES = new Set([2054]);
 
 /**
  * Translate a Cloudflare REST API failure into the same AxiError codes the
@@ -209,6 +213,12 @@ export function mapApiError(
     codes.some((c) => API_AUTH_CODES.has(c)) ||
     (!isNotFound && (status === 401 || status === 403));
 
+  if (codes.some((c) => API_UNVERIFIED_CODES.has(c))) {
+    return new AxiError(detail, "UNVERIFIED", [
+      "Click the verification link Cloudflare emailed to the destination, then re-run",
+      "Run `cloudflare-axi email addresses` to check which destinations are verified",
+    ]);
+  }
   if (isNotFound) {
     return new AxiError(detail, "NOT_FOUND", [
       "Check the zone name / id and that this account owns it",

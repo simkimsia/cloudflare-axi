@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertEmail,
   checkLiveDns,
   dnsRole,
+  findRule,
+  forwardRuleBody,
+  parseForwardTarget,
+  planDestination,
+  planForward,
   toAddressRows,
   toDnsRows,
   toRuleRows,
@@ -184,5 +190,119 @@ describe("checkLiveDns", () => {
       },
     };
     expect(await checkLiveDns([DNS[3]], chunked)).toEqual(["ok"]);
+  });
+});
+
+describe("email write planners", () => {
+  it("planDestination: new, verified, and pending addresses", () => {
+    expect(planDestination(ADDRESSES, "new@gmail.example")).toBe("create");
+    expect(planDestination(ADDRESSES, "inbox@gmail.example")).toBe("verified");
+    expect(planDestination(ADDRESSES, "pending@gmail.example")).toBe("pending");
+  });
+
+  it("assertEmail lowercases and rejects non-addresses", () => {
+    expect(assertEmail("You@Gmail.com", "destination")).toBe("you@gmail.com");
+    expect(() => assertEmail("hello", "destination")).toThrow(
+      /must be an email address/,
+    );
+  });
+
+  it("parseForwardTarget: catch-all, local part, full address on and off the zone", () => {
+    expect(parseForwardTarget("*", "example.com")).toEqual({ catchAll: true });
+    expect(parseForwardTarget("Hello", "example.com")).toEqual({
+      catchAll: false,
+      address: "hello@example.com",
+    });
+    expect(parseForwardTarget("hi@mail.example.com", "example.com")).toEqual({
+      catchAll: false,
+      address: "hi@mail.example.com",
+    });
+    expect(() => parseForwardTarget("hi@other.com", "example.com")).toThrow(
+      /not on zone example.com/,
+    );
+  });
+
+  it("findRule matches the catch-all and literal rules by address", () => {
+    expect(findRule(RULES, { catchAll: true })?.id).toBe("a27d");
+    expect(
+      findRule(RULES, { catchAll: false, address: "hello@example.com" })?.id,
+    ).toBe("d4a1");
+    expect(
+      findRule(RULES, { catchAll: false, address: "sales@example.com" }),
+    ).toBeUndefined();
+  });
+
+  it("planForward fails before the API when the destination is missing or unverified", () => {
+    const target = { catchAll: false as const, address: "sales@example.com" };
+    expect(() =>
+      planForward(RULES, ADDRESSES, target, "new@gmail.example"),
+    ).toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+    expect(() =>
+      planForward(RULES, ADDRESSES, target, "pending@gmail.example"),
+    ).toThrow(expect.objectContaining({ code: "UNVERIFIED" }));
+  });
+
+  it("planForward: noop when already forwarding, update when different, create when absent", () => {
+    expect(
+      planForward(RULES, ADDRESSES, { catchAll: true }, "inbox@gmail.example")
+        .kind,
+    ).toBe("noop");
+    const other: EmailAddress = {
+      id: "3",
+      email: "other@gmail.example",
+      status: "verified",
+      verified: "2026-09-01T00:00:00Z",
+    };
+    const plan = planForward(
+      RULES,
+      [...ADDRESSES, other],
+      { catchAll: false, address: "hello@example.com" },
+      "other@gmail.example",
+    );
+    expect(plan).toMatchObject({ kind: "update", rule: { id: "d4a1" } });
+    expect(
+      planForward(
+        RULES,
+        ADDRESSES,
+        { catchAll: false, address: "sales@example.com" },
+        "inbox@gmail.example",
+      ).kind,
+    ).toBe("create");
+  });
+
+  it("planForward: a disabled matching rule is updated, a missing catch-all is a PUT", () => {
+    const disabled = RULES.map((r) =>
+      r.id === "a27d" ? { ...r, enabled: false } : r,
+    );
+    expect(
+      planForward(
+        disabled,
+        ADDRESSES,
+        { catchAll: true },
+        "inbox@gmail.example",
+      ).kind,
+    ).toBe("update");
+    expect(
+      planForward([], ADDRESSES, { catchAll: true }, "inbox@gmail.example"),
+    ).toMatchObject({ kind: "update", rule: { id: "catch_all" } });
+  });
+
+  it("forwardRuleBody builds the documented catch-all and literal shapes", () => {
+    expect(forwardRuleBody({ catchAll: true }, "a@b.example")).toEqual({
+      name: "catch-all to a@b.example",
+      enabled: true,
+      matchers: [{ type: "all" }],
+      actions: [{ type: "forward", value: ["a@b.example"] }],
+    });
+    expect(
+      forwardRuleBody(
+        { catchAll: false, address: "hello@example.com" },
+        "a@b.example",
+        "kept name",
+      ),
+    ).toMatchObject({
+      name: "kept name",
+      matchers: [{ type: "literal", field: "to", value: "hello@example.com" }],
+    });
   });
 });
