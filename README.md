@@ -30,17 +30,22 @@ on macOS). That OAuth token carries the `email_routing` scope by default;
 
 ## Install
 
-Not on npm yet, so `npx -y @simkimsia/cloudflare-axi` does not work. Install from a clone:
+```sh
+pnpm add -g @simkimsia/cloudflare-axi
+```
+
+Or run it without installing: `npx -y @simkimsia/cloudflare-axi --help`.
+
+Check it: `cloudflare-axi --version`. Update later with `cloudflare-axi update`.
+
+To work on it from a clone:
 
 ```sh
 git clone https://github.com/simkimsia/cloudflare-axi
-pnpm --prefix cloudflare-axi install
-pnpm --prefix cloudflare-axi run build
-pnpm --prefix cloudflare-axi link --global   # puts `cloudflare-axi` on PATH
+pnpm -C cloudflare-axi install
+pnpm -C cloudflare-axi run build
+pnpm add -g link:$PWD/cloudflare-axi   # puts `cloudflare-axi` on PATH
 ```
-
-Check it: `cloudflare-axi --version`. To update later, `git pull` in the clone
-and run the build step again.
 
 ## Usage
 
