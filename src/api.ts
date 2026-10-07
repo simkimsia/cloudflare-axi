@@ -1,4 +1,5 @@
 import { resolveApiCredentials } from "./credentials.js";
+import { debugApi } from "./debug.js";
 import {
   AxiError,
   mapApiError,
@@ -37,6 +38,7 @@ export async function cfRequest<T = unknown>(
     Accept: "application/json",
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  debugApi(method, path);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {

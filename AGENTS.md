@@ -21,6 +21,9 @@ the upstream `kunchenguid/axi` repo).
   (`wranglerJson` / `wranglerExec`). Non-zero exits route through
   `mapWranglerError`; a missing binary maps to `WRANGLER_NOT_INSTALLED`.
   `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner.
+- `src/debug.ts` — `AXI_DEBUG=1` prints each wrangler argv (from `run` in
+  `src/wrangler.ts`) and each REST method and path (from `cfRequest`) to
+  stderr, with `CLOUDFLARE_API_TOKEN` masked. Never headers or bodies.
 - `src/errors.ts` — `mapWranglerError` strips ANSI first (wrangler colors its
   stderr), then walks `patterns` in order and returns on the first regex hit,
   so order is the contract: narrow patterns before broad ones (same rule as
