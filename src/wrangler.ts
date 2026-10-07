@@ -5,6 +5,7 @@ import {
   UNKNOWN_SUGGESTION,
   wranglerNotInstalledError,
 } from "./errors.js";
+import { debugWrangler } from "./debug.js";
 
 export interface ExecResult {
   stdout: string;
@@ -15,6 +16,7 @@ export interface ExecResult {
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10 MB
 
 function run(args: string[]): Promise<ExecResult> {
+  debugWrangler(args);
   return new Promise((resolve) => {
     execFile(
       "wrangler",

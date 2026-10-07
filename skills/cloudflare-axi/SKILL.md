@@ -39,6 +39,7 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
 ## When cloudflare-axi cannot do it
 
 1. Try `cloudflare-axi <command>` first and read the structured error.
+   Rerun with `AXI_DEBUG=1` to print each forwarded `wrangler` argv and REST method and path to stderr.
 2. If the error is `VALIDATION_ERROR` with `Unknown command`, or the command
    exists but lacks the flag you need, fall back to raw `wrangler` and finish
    the user's task. Examples: `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
@@ -67,6 +68,12 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
 
    ## What worked instead
    `wrangler <exact command>`
+
+   ## Plain CLI result, with the exact argv the axi forwarded (AXI_DEBUG=1)
+   <works / same failure / n/a>
+
+   ## If same failure
+   <should the axi shape the arguments, map the error, or document the limit?>
 
    ## What the agent needed from the output
    <fields / shape, e.g. "deployment id, status, created_at as a TOON table">
