@@ -20,6 +20,16 @@ export class AxiError extends Error {
   }
 }
 
+/**
+ * Every NOT_LINKED points at both fixes: run from the Worker's directory, or
+ * name its config with `--config` (accepted by every directory-scoped
+ * command; see src/config.ts).
+ */
+export const NOT_LINKED_SUGGESTIONS = [
+  "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
+  "Or pass `--config <path>` to the Worker's wrangler config (works from any directory)",
+];
+
 export function exitCodeForError(error: { code: string }): number {
   return error.code === "VALIDATION_ERROR" ? 2 : 1;
 }
@@ -117,7 +127,7 @@ const patterns: ErrorPattern[] = [
     code: "NOT_LINKED",
     message: "No Worker is configured in this directory",
     suggestions: [
-      "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
+      ...NOT_LINKED_SUGGESTIONS,
       "Run `cloudflare-axi pages` or `cloudflare-axi kv` for account-wide views",
     ],
   },
@@ -129,10 +139,7 @@ const patterns: ErrorPattern[] = [
     pattern: /Required Worker name missing/i,
     code: "NOT_LINKED",
     message: "No Worker is configured in this directory",
-    suggestions: [
-      "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
-      "Or pass `--name <worker>`",
-    ],
+    suggestions: [...NOT_LINKED_SUGGESTIONS, "Or pass `--name <worker>`"],
   },
   {
     // Real stderr (`wrangler secret list --name x` for a missing Worker,
@@ -141,7 +148,7 @@ const patterns: ErrorPattern[] = [
     pattern: /Worker "[^"]+" not found\./i,
     code: "NOT_FOUND",
     suggestions: [
-      "Run `cloudflare-axi workers deploy --dry-run` in the Worker's directory to see the name its config deploys",
+      "Run `cloudflare-axi workers deploy --dry-run --config <path>` to see the Worker name a config deploys",
       "cloudflare-axi cannot list the account's Workers yet; check the exact name under Workers & Pages in the Cloudflare dashboard",
       "A new Worker must be deployed first: `cloudflare-axi workers deploy --name <worker>`",
     ],
@@ -156,10 +163,7 @@ const patterns: ErrorPattern[] = [
       /Missing entry-point to Worker script|Could not detect a directory containing static files/i,
     code: "NOT_LINKED",
     message: "No Worker is configured in this directory",
-    suggestions: [
-      "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
-      "Or pass `--config <path>` to the Worker's wrangler config",
-    ],
+    suggestions: NOT_LINKED_SUGGESTIONS,
   },
   {
     // Real stderr: "This Worker does not exist on your account.

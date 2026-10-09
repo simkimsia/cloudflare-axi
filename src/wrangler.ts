@@ -26,10 +26,15 @@ export interface RunOptions {
   input?: string;
   /** Extra environment variables for this call, on top of process.env. */
   env?: Record<string, string>;
+  /**
+   * Working directory for wrangler (default: this process's cwd). `--config`
+   * runs set it to the config's directory; see src/config.ts.
+   */
+  cwd?: string;
 }
 
 function run(args: string[], opts: RunOptions = {}): Promise<ExecResult> {
-  debugWrangler(args);
+  debugWrangler(args, opts.cwd);
   return new Promise((resolve) => {
     const child = execFile(
       "wrangler",
@@ -37,6 +42,7 @@ function run(args: string[], opts: RunOptions = {}): Promise<ExecResult> {
       {
         maxBuffer: MAX_BUFFER_BYTES,
         ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
       },
       (error, stdout, stderr) => {
         if (error && (error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -71,8 +77,11 @@ export function extractJson(stdout: string): string {
 }
 
 /** Execute wrangler and return parsed JSON. */
-export async function wranglerJson<T = unknown>(args: string[]): Promise<T> {
-  const result = await run(args);
+export async function wranglerJson<T = unknown>(
+  args: string[],
+  opts?: RunOptions,
+): Promise<T> {
+  const result = await run(args, opts);
   if (result.stderr === "ENOENT") throw wranglerNotInstalledError();
   if (result.exitCode !== 0) {
     throw mapWranglerError(result.stderr || result.stdout, result.exitCode);

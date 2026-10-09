@@ -18,7 +18,7 @@ the upstream `kunchenguid/axi` repo).
   `src/version.ts` must stay a LEAF module (node builtins only) or the fast
   path silently stops being fast.
 - `src/wrangler.ts` — sole place that spawns the `wrangler` binary
-  (`wranglerJson` / `wranglerExec`, both taking optional `{ input, env }`).
+  (`wranglerJson` / `wranglerExec`, both taking optional `{ input, env, cwd }`).
   Non-zero exits route through `mapWranglerError`; a missing binary maps to
   `WRANGLER_NOT_INSTALLED`. `extractJson` tolerates the "⛅️ wrangler x.y.z"
   stdout banner. `run` always closes the child's stdin (writing `input` when
@@ -52,6 +52,21 @@ the upstream `kunchenguid/axi` repo).
   `rejectExtraArgs`, which names every leftover token with exit code 2
   (AXI §6). Take value flags before positionals so a flag's value is never
   mistaken for a positional.
+- `src/config.ts` — global `--config <path>` for the directory-scoped
+  commands (dashboard, `deployments`, `workers ...`). `takeConfig` validates
+  the path (missing or a directory → `VALIDATION_ERROR`) and returns it
+  absolute; `configArgs` + `configRunOptions` forward `--config <abs>` AND
+  spawn wrangler with the config's directory as cwd, because wrangler resolves
+  `main`/`assets` against the config but runs a custom `build.command`, reads
+  `.env` and writes `.wrangler/` against the process cwd. A child cwd rather
+  than wrangler's own global `--cwd` keeps older 4.x working. `configSuffix`
+  threads `--config` into next-step hints; `withConfigContext` rewrites a
+  NOT_LINKED under `--config` to name the config. `liftLeadingConfig` in
+  `src/cli.ts` accepts a leading `--config` (the SDK rejects leading flags):
+  alone it feeds the dashboard, otherwise it moves to the end of argv where
+  the command parses or rejects it. Account-scoped commands reject it.
+  `NOT_LINKED_SUGGESTIONS` in `src/errors.ts` makes every NOT_LINKED suggest
+  `--config <path>`.
 - `src/commands/workers.ts` — `workers deploy` (dry-run name check, then a
   real deploy that never forwards `--name`), `workers secret list|put`
   (value on stdin only; read-only `secret list` precheck before `put`;
@@ -89,9 +104,14 @@ the upstream `kunchenguid/axi` repo).
   taken name → "[code: 8000002]" → `ALREADY_EXISTS`. The production branch
   defaults to `main` on the wrangler side too.
 - `wrangler deployments list` is directory-scoped: it needs a Worker name
-  from a wrangler config in cwd (or `--name`); without one it fails with
-  "You need to provide a name for your Worker" → mapped to `NOT_LINKED`
-  (same code as railway-axi and netlify-axi). `pages`/`kv` are account-scoped.
+  from a wrangler config in cwd (or `--config` / `--name`); without one it
+  fails with "You need to provide a name for your Worker" → mapped to
+  `NOT_LINKED` (same code as railway-axi and netlify-axi). `pages`/`kv` are
+  account-scoped.
+- wrangler 4.x has global `--config`/`-c` and `--cwd` (which `chdir`s before
+  resolving a relative `--config`). Under `--config`, `main`, `base_dir`,
+  `assets` and `site` resolve against the config's directory; `build.cwd`
+  (default: process cwd), `--outdir` and `.env` do not.
 - Error stderr is ANSI-colored and shaped like
   `✘ [ERROR] A request to the Cloudflare API (...) failed.` followed by an
   indented detail line such as `Authentication error [code: 10000]` or

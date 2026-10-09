@@ -23,7 +23,7 @@ from a clone.
 
 It wraps [`wrangler`](https://developers.cloudflare.com/workers/wrangler/), which must be installed and logged in
 (`wrangler login, or set CLOUDFLARE_API_TOKEN`). If a command fails with `WRANGLER_NOT_INSTALLED`, ask the user to
-install `wrangler`. `NOT_LINKED` means no Worker config (wrangler.toml / wrangler.jsonc) in the current directory; run from the Worker's directory or use `pages` / `kv` which do not need one.
+install `wrangler`. `NOT_LINKED` means no Worker config (wrangler.toml / wrangler.jsonc) in the current directory; pass `--config <path>` to the Worker's wrangler config (no `cd` needed), or use `pages` / `kv` which do not need one.
 
 ## Current guidance lives in the CLI
 
@@ -34,7 +34,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `workers` (`workers deploy --dry-run`, `workers deploy --name <worker>`, `workers secret list [--name <worker>]`, `workers secret put <KEY> --name <worker>` with the value on stdin; `--config <path>` accepted throughout), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `workers` (`workers deploy --dry-run`, `workers deploy --name <worker>`, `workers secret list [--name <worker>]`, `workers secret put <KEY> --name <worker>` with the value on stdin), with `--config <path>` accepted by the dashboard, `deployments` and every `workers` subcommand to target another Worker's config from any directory, `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
 
 ## When cloudflare-axi cannot do it
 

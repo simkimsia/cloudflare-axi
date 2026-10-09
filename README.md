@@ -53,6 +53,7 @@ pnpm add -g link:$PWD/cloudflare-axi   # puts `cloudflare-axi` on PATH
 ```sh
 cloudflare-axi              # dashboard: this directory's Worker, or Pages projects
 cloudflare-axi deployments  # recent deployments of the Worker configured in cwd
+cloudflare-axi deployments --config ~/Projects/my-worker/wrangler.toml   # same, from any directory
 cloudflare-axi workers deploy --dry-run              # bundle the Worker in cwd locally; nothing uploaded
 cloudflare-axi workers deploy --name <worker>        # real deploy; --name must match the config's Worker
 cloudflare-axi workers secret list [--name <worker>] # secret names and types (never values)
@@ -76,6 +77,16 @@ cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
 cloudflare-axi update       # self-update (built into axi-sdk-js)
 ```
+
+`--config <path>` works on every command that depends on a Worker's wrangler
+config: the dashboard (`cloudflare-axi --config <path>`), `deployments`, and
+all `workers` subcommands. It may come before or after the command. The path
+must exist (else `VALIDATION_ERROR`, exit 2); wrangler then runs from the
+config's directory, so relative `main`, a custom `build.command`, `.env` files
+and `.wrangler/` state resolve exactly as if you had run it there, with no
+`cd`. A relative `--outdir` still resolves against your own cwd. Account-wide
+commands (`pages`, `kv`, `whoami`, `email`) reject it. A `NOT_LINKED` error
+(no Worker config found) suggests it.
 
 Set `AXI_DEBUG=1` to print each forwarded `wrangler` argv and each REST method and path to stderr (no headers, bodies or tokens). stdout is unchanged.
 

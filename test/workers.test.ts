@@ -1,16 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the spawn layer: these tests never run the real wrangler binary.
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 
 import { execFile } from "node:child_process";
-import { AxiError } from "../src/errors.js";
+import { findWranglerConfig } from "../src/config.js";
 import { parseOutputEntries } from "../src/wrangler.js";
+import { failure, fakeWrangler } from "./fake-wrangler.js";
 import {
-  findWranglerConfig,
   parseBindings,
   parseUploadSize,
   redactValue,
@@ -94,52 +94,6 @@ const WORKER_NOT_FOUND_STDERR = `[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mWork
   If this is a new Worker, run \`wrangler deploy\` first to create it.
   Otherwise, check that the Worker name is correct and you're logged into the right account.`;
 
-// ---- fake wrangler ----
-
-interface Call {
-  args: string[];
-  env?: Record<string, string | undefined>;
-  stdin?: string;
-}
-interface Reply {
-  stdout?: string;
-  stderr?: string;
-  exitCode?: number;
-  ndjson?: string;
-}
-
-function fakeWrangler(replies: (args: string[]) => Reply): Call[] {
-  const calls: Call[] = [];
-  vi.mocked(execFile).mockImplementation(((
-    _cmd: string,
-    args: string[],
-    opts: { env?: Record<string, string | undefined> },
-    cb: (err: unknown, stdout: string, stderr: string) => void,
-  ) => {
-    const call: Call = { args, env: opts?.env };
-    calls.push(call);
-    const reply = replies(args);
-    const outFile = opts?.env?.WRANGLER_OUTPUT_FILE_PATH;
-    if (outFile && reply.ndjson) writeFileSync(outFile, reply.ndjson);
-    setImmediate(() =>
-      cb(
-        reply.exitCode ? { code: reply.exitCode } : null,
-        reply.stdout ?? "",
-        reply.stderr ?? "",
-      ),
-    );
-    return {
-      stdin: {
-        on: () => undefined,
-        end: (input: string) => {
-          call.stdin = input;
-        },
-      },
-    };
-  }) as never);
-  return calls;
-}
-
 let dir: string;
 let config: string;
 
@@ -153,16 +107,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.mocked(execFile).mockReset();
 });
-
-async function failure(promise: Promise<unknown>): Promise<AxiError> {
-  try {
-    await promise;
-  } catch (error) {
-    expect(error).toBeInstanceOf(AxiError);
-    return error as AxiError;
-  }
-  throw new Error("expected a failure");
-}
 
 // ---- pure helpers ----
 
@@ -392,8 +336,11 @@ describe("workers deploy", () => {
       "--config",
       config,
       "--outdir",
-      "dist",
+      // wrangler runs from the config's dir, so a relative --outdir is
+      // resolved against the caller's cwd first.
+      resolve("dist"),
     ]);
+    expect(calls[0].cwd).toBe(dir);
     expect(calls[0].env?.WRANGLER_OUTPUT_FILE_PATH).toMatch(/out\.ndjson$/);
     expect(out).toContain("worker: family-haze-bot");
     expect(out).toContain("upload: 181.11 KiB (gzip 164.93 KiB)");
@@ -709,5 +656,192 @@ describe("workers (bare)", () => {
     expect(out).toContain(
       "Run `cloudflare-axi deployments` for recent deployments",
     );
+  });
+});
+
+// ---- --config (issue #38) ----
+
+describe("workers --config", () => {
+  it("runs every wrangler call from the config's directory with an absolute --config", async () => {
+    const calls = fakeWrangler((args) =>
+      args.includes("--dry-run")
+        ? { stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }
+        : { stdout: REAL_DEPLOY_STDOUT, ndjson: REAL_DEPLOY_NDJSON },
+    );
+    // A relative path, as an agent in another directory would pass it.
+    const rel = relative(process.cwd(), config);
+    const out = await workersCommand([
+      "deploy",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      rel,
+    ]);
+    expect(calls.map((c) => c.args)).toEqual([
+      ["deploy", "--dry-run", "--config", config],
+      ["deploy", "--config", config],
+    ]);
+    expect(calls.map((c) => c.cwd)).toEqual([dir, dir]);
+    // Next steps keep working without a cd.
+    expect(out).toContain(`cloudflare-axi deployments --config ${config}`);
+    expect(out).toContain(
+      `workers secret list --name family-haze-bot --config ${config}`,
+    );
+  });
+
+  it("does not need a config in cwd when --config is given", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/");
+    const calls = fakeWrangler(() => ({
+      stdout: DRY_RUN_STDOUT,
+      ndjson: DRY_RUN_NDJSON,
+    }));
+    const out = await workersCommand([
+      "deploy",
+      "--dry-run",
+      "--config",
+      config,
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe(dir);
+    expect(out).toContain(
+      `workers deploy --name family-haze-bot --config ${config}`,
+    );
+  });
+
+  it("leaves cwd alone without --config", async () => {
+    const calls = fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
+    await workersCommand(["secret", "list", "--name", "family-haze-bot"]);
+    expect(calls[0].cwd).toBeUndefined();
+    expect(calls[0].args).not.toContain("--config");
+  });
+
+  it("secret list passes --config and runs from its directory", async () => {
+    const calls = fakeWrangler(() => ({ stdout: "[]" }));
+    const out = await workersCommand(["secret", "list", "--config", config]);
+    expect(calls[0].args).toEqual([
+      "secret",
+      "list",
+      "--format",
+      "json",
+      "--config",
+      config,
+    ]);
+    expect(calls[0].cwd).toBe(dir);
+    expect(out).toContain(
+      `secrets: 0 secrets on the Worker configured in ${config}`,
+    );
+    expect(out).toContain(`workers deploy --dry-run --config ${config}`);
+  });
+
+  it("secret put prechecks and puts from the config's directory", async () => {
+    vi.spyOn(stdinSource, "isTTY").mockReturnValue(false);
+    vi.spyOn(stdinSource, "read").mockResolvedValue("s3cr3t-value");
+    const calls = fakeWrangler((args) =>
+      args[1] === "list"
+        ? { stdout: SECRET_LIST_JSON }
+        : { stdout: "✨ Success! Uploaded secret NEW_KEY\n" },
+    );
+    const out = await workersCommand([
+      "secret",
+      "put",
+      "NEW_KEY",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      config,
+    ]);
+    expect(calls.map((c) => c.args)).toEqual([
+      [
+        "secret",
+        "list",
+        "--format",
+        "json",
+        "--name",
+        "family-haze-bot",
+        "--config",
+        config,
+      ],
+      [
+        "secret",
+        "put",
+        "NEW_KEY",
+        "--name",
+        "family-haze-bot",
+        "--config",
+        config,
+      ],
+    ]);
+    expect(calls.map((c) => c.cwd)).toEqual([dir, dir]);
+    expect(calls[1].stdin).toBe("s3cr3t-value");
+    expect(out).toContain(`--config ${config}`);
+  });
+
+  it.each([
+    ["deploy", ["deploy", "--dry-run"]],
+    ["secret list", ["secret", "list"]],
+  ])(
+    "%s: a missing --config path is VALIDATION_ERROR before wrangler",
+    async (_label, argv) => {
+      const calls = fakeWrangler(() => ({}));
+      const err = await failure(
+        workersCommand([...argv, "--config", join(dir, "nope.toml")]),
+      );
+      expect(err.code).toBe("VALIDATION_ERROR");
+      expect(err.message).toContain("does not exist");
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it("secret put: a missing --config path is VALIDATION_ERROR before any wrangler call", async () => {
+    vi.spyOn(stdinSource, "isTTY").mockReturnValue(false);
+    vi.spyOn(stdinSource, "read").mockResolvedValue("s3cr3t-value");
+    const calls = fakeWrangler(() => ({}));
+    const err = await failure(
+      workersCommand([
+        "secret",
+        "put",
+        "K",
+        "--name",
+        "w",
+        "--config",
+        join(dir, "nope.toml"),
+      ]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a directory --config names the config file inside it", async () => {
+    const calls = fakeWrangler(() => ({}));
+    const err = await failure(
+      workersCommand(["deploy", "--dry-run", "--config", dir]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("is a directory");
+    expect(err.suggestions).toEqual([`Use \`--config ${config}\``]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("NOT_LINKED from a config with no Worker name names the config", async () => {
+    fakeWrangler(() => ({
+      stderr:
+        "✘ [ERROR] Required Worker name missing. Please specify the Worker name in your Wrangler configuration file, or pass it as an argument with `--name <worker-name>`",
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand(["secret", "list", "--config", config]),
+    );
+    expect(err.code).toBe("NOT_LINKED");
+    expect(err.message).toBe(
+      `No Worker is configured in ${config} (wrangler found no Worker name in it)`,
+    );
+  });
+
+  it("NOT_LINKED without --config suggests --config", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/");
+    fakeWrangler(() => ({}));
+    const err = await failure(workersCommand(["deploy", "--dry-run"]));
+    expect(err.code).toBe("NOT_LINKED");
+    expect(err.suggestions.join(" ")).toContain("--config <path>");
   });
 });

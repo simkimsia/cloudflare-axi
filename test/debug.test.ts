@@ -49,6 +49,18 @@ describe("AXI_DEBUG", () => {
     ]);
   });
 
+  it("notes the child cwd when a --config run spawns wrangler elsewhere", () => {
+    vi.stubEnv("AXI_DEBUG", "1");
+    const { lines } = captureStderr();
+    debugWrangler(
+      ["deployments", "list", "--json", "--config", "/w/my app/wrangler.toml"],
+      "/w/my app",
+    );
+    expect(lines).toEqual([
+      "[axi-debug] wrangler deployments list --json --config '/w/my app/wrangler.toml'  # cwd: '/w/my app'\n",
+    ]);
+  });
+
   it("prints nothing when AXI_DEBUG is unset or not 1", () => {
     const { lines } = captureStderr();
     vi.stubEnv("AXI_DEBUG", "");
