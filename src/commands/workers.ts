@@ -7,7 +7,7 @@ import {
   takeFlag,
   takePositional,
 } from "../args.js";
-import { AxiError } from "../errors.js";
+import { AxiError, stripAnsi } from "../errors.js";
 import { encode, renderHelp, renderList, renderOutput } from "../toon.js";
 import {
   wranglerExec,
@@ -60,11 +60,12 @@ const NOT_LINKED_SUGGESTIONS = [
  * ND-JSON output file). Rows sit between "Your Worker has access to the
  * following bindings:" and the next blank line, after a "Binding Resource"
  * header. The parenthesized detail holds var values and ids, so it is dropped.
+ * ANSI is stripped first: with FORCE_COLOR wrangler colors header and rows.
  */
 export function parseBindings(
   stdout: string,
 ): { name: string; type: string }[] {
-  const lines = stdout.split("\n");
+  const lines = stripAnsi(stdout).split("\n");
   const start = lines.findIndex((l) =>
     /has access to the following bindings:/.test(l),
   );
@@ -84,14 +85,17 @@ export function parseBindings(
 
 /** "Total Upload: 181.11 KiB / gzip: 164.93 KiB" -> "181.11 KiB (gzip 164.93 KiB)". */
 export function parseUploadSize(stdout: string): string | undefined {
-  const m = /Total Upload:\s*(.+?)\s*\/\s*gzip:\s*(.+?)\s*$/m.exec(stdout);
+  const m = /Total Upload:\s*(.+?)\s*\/\s*gzip:\s*(.+?)\s*$/m.exec(
+    stripAnsi(stdout),
+  );
   return m ? `${m[1]} (gzip ${m[2]})` : undefined;
 }
 
 /**
  * Split the `targets` string[] of a `deploy` output entry: workers.dev URLs,
  * routes and custom domains -> urls; "schedule: <cron>" -> crons; anything
- * else ("Producer for <queue>", "workflow: <name>") -> other.
+ * else ("Producer for <queue>", "workflow: <name>", and the
+ * "...and <n> more routes" marker wrangler appends past 10 routes) -> other.
  */
 export function splitTargets(targets: unknown): {
   urls: string[];
@@ -108,6 +112,7 @@ export function splitTargets(targets: unknown): {
     if (typeof t !== "string") continue;
     if (t.startsWith("schedule: "))
       out.crons.push(t.slice("schedule: ".length));
+    else if (/^\.\.\.and \d+ more routes?$/.test(t)) out.other.push(t);
     else if (t.startsWith("https://") || t.includes("/") || t.includes("."))
       out.urls.push(t);
     else out.other.push(t);
@@ -306,7 +311,7 @@ async function deploy(args: string[]): Promise<string> {
   const entry = lastDeployEntry(result.entries);
   const version =
     str(entry?.version_id) ??
-    /Current Version ID:\s*(\S+)/.exec(result.stdout)?.[1];
+    /Current Version ID:\s*(\S+)/.exec(stripAnsi(result.stdout))?.[1];
   if (!version) {
     throw new AxiError(
       `wrangler reported no version id: ${result.stdout.trim().split("\n").pop() ?? ""}`,
@@ -323,8 +328,11 @@ async function deploy(args: string[]): Promise<string> {
     encode({
       worker: str(entry?.worker_name) ?? worker,
       version,
-      urls: targets.urls,
-      crons: targets.crons,
+      urls:
+        targets.urls.length > 0
+          ? targets.urls
+          : "none (workers_dev off and no routes or custom domains)",
+      crons: targets.crons.length > 0 ? targets.crons : "none",
       ...(targets.other.length > 0 ? { other: targets.other } : {}),
       upload:
         parseUploadSize(result.stdout) ??
@@ -365,10 +373,18 @@ async function secretList(args: string[]): Promise<string> {
 
   const secrets = await listSecrets(name, config);
   const worker = name ?? "<worker>";
+  // wrangler's secret list JSON does not name the Worker it resolved, so
+  // without --name point at a command that shows it.
+  const findName = name
+    ? []
+    : [
+        "Run `cloudflare-axi workers deploy --dry-run` to see the Worker name this config deploys",
+      ];
   if (secrets.length === 0) {
     return renderOutput([
       `secrets: 0 secrets on ${name ?? "the Worker configured in this directory"}`,
       renderHelp([
+        ...findName,
         `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}\` to add one`,
       ]),
     ]);
@@ -378,6 +394,7 @@ async function secretList(args: string[]): Promise<string> {
     renderList("secrets", toSecretRows(secrets)),
     renderHelp([
       "Values are write-only; Cloudflare never returns them",
+      ...findName,
       `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}\` to add or rotate one`,
     ]),
   ]);
@@ -408,15 +425,18 @@ export function redactValue(text: string, value: string): string {
   return out;
 }
 
+const KNOWN_PUT_FLAGS = new Set(["--name", "--config", "--env", "--help"]);
+
 async function secretPut(args: string[]): Promise<string> {
   const name = takeFlag(args, "--name");
   const config = takeFlag(args, "--config");
   const key = takePositional(args);
   if (args.length > 0) {
-    // Never echo leftovers: a stray token is most likely the secret value.
+    // Never echo leftovers: a stray token is most likely the secret value,
+    // and a value can start with "-". Only exact known flag names are named.
     const flags = args
-      .filter((a) => a.startsWith("-"))
-      .map((a) => a.split("=")[0]);
+      .map((a) => a.split("=")[0])
+      .filter((a) => KNOWN_PUT_FLAGS.has(a));
     throw new AxiError(
       `secret put takes the value on stdin only; unexpected input was not echoed${
         flags.length > 0 ? ` (flags: ${[...new Set(flags)].join(", ")})` : ""

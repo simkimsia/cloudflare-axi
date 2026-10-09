@@ -183,6 +183,23 @@ describe("parseBindings", () => {
     expect(flat).not.toContain("HazeKakiBot");
   });
 
+  it("strips ANSI first (FORCE_COLOR colors header and rows)", () => {
+    // Shape from wrangler 4.127.1 source: dim2() header, white() name,
+    // brandColor() type, dim2() value.
+    const colored = [
+      "\u001b[2mTotal Upload: 181.11 KiB / gzip: 164.93 KiB\u001b[22m",
+      "Your Worker has access to the following bindings:",
+      "\u001b[2mBinding\u001b[22m                                  \u001b[2mResource\u001b[22m      ",
+      "\u001b[37menv.SETTINGS\u001b[39m (\u001b[2m8cd31376\u001b[22m)                    \u001b[38;5;214mKV Namespace\u001b[39m  ",
+      "",
+      "Current Version ID: \u001b[36mabc-123\u001b[39m",
+    ].join("\n");
+    expect(parseBindings(colored)).toEqual([
+      { name: "SETTINGS", type: "KV Namespace" },
+    ]);
+    expect(parseUploadSize(colored)).toBe("181.11 KiB (gzip 164.93 KiB)");
+  });
+
   it("returns [] when there is no bindings table", () => {
     expect(parseBindings("Total Upload: 1 KiB / gzip: 1 KiB\n")).toEqual([]);
   });
@@ -229,6 +246,14 @@ describe("splitTargets", () => {
       other: ["Producer for my-queue"],
     });
     expect(splitTargets(undefined)).toEqual({ urls: [], crons: [], other: [] });
+  });
+
+  it("does not report wrangler's >10 routes truncation marker as a URL", () => {
+    expect(splitTargets(["example.com/a/*", "...and 5 more routes"])).toEqual({
+      urls: ["example.com/a/*"],
+      crons: [],
+      other: ["...and 5 more routes"],
+    });
   });
 });
 
@@ -400,6 +425,28 @@ describe("workers deploy", () => {
     expect(out).toContain("bindings[6]{name,type}:");
   });
 
+  it("states empty urls and crons in words", async () => {
+    const entry = { ...REAL_DEPLOY_ENTRY, targets: [] };
+    fakeWrangler((args) =>
+      args.includes("--dry-run")
+        ? { stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }
+        : {
+            stdout: REAL_DEPLOY_STDOUT,
+            ndjson: `${DRY_RUN_NDJSON.split("\n")[0]}\n${JSON.stringify(entry)}\n`,
+          },
+    );
+    const out = await workersCommand([
+      "deploy",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      config,
+    ]);
+    expect(out).toMatch(/urls: "?none \(workers_dev off/);
+    expect(out).toContain("crons: none");
+    expect(out).not.toContain("[]");
+  });
+
   it("falls back to the stdout version id when the output file has none", async () => {
     fakeWrangler((args) =>
       args.includes("--dry-run")
@@ -466,6 +513,19 @@ describe("workers secret list", () => {
     expect(out).toContain(
       "secrets: 0 secrets on the Worker configured in this directory",
     );
+    expect(out).toContain("workers deploy --dry-run` to see the Worker name");
+  });
+
+  it("names the Worker in hints when --name is given", async () => {
+    fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
+    const out = await workersCommand([
+      "secret",
+      "list",
+      "--name",
+      "family-haze-bot",
+    ]);
+    expect(out).toContain("--name family-haze-bot");
+    expect(out).not.toContain("--dry-run");
   });
 
   it("maps a missing Worker to NOT_FOUND", async () => {
@@ -474,6 +534,8 @@ describe("workers secret list", () => {
       workersCommand(["secret", "list", "--name", "family-haze-bto"]),
     );
     expect(err.code).toBe("NOT_FOUND");
+    expect(err.suggestions.join(" ")).toContain("workers deploy --dry-run");
+    expect(err.suggestions.join(" ")).not.toContain("secret list");
   });
 });
 
@@ -517,6 +579,8 @@ describe("workers secret put", () => {
     [["API_KEY", `--value=${SECRET}`, "--name", "w"]],
     [["API_KEY", "--value", SECRET, "--name", "w"]],
     [[`API_KEY=${SECRET}`, "--name", "w"]],
+    [["API_KEY", `-${SECRET}`, "--name", "w"]],
+    [["API_KEY", `--${SECRET}`, "--name", "w"]],
   ])("never echoes a value passed in argv: %j", async (argv) => {
     pipeStdin(SECRET);
     const calls = fakeWrangler(() => ({}));
@@ -526,6 +590,24 @@ describe("workers secret put", () => {
       SECRET,
     );
     expect(calls).toHaveLength(0);
+  });
+
+  it("names only exact known flags among the leftovers", async () => {
+    pipeStdin(SECRET);
+    fakeWrangler(() => ({}));
+    const err = await failure(
+      workersCommand([
+        "secret",
+        "put",
+        "API_KEY",
+        "--env=prod",
+        `-${SECRET}`,
+        "--name",
+        "w",
+      ]),
+    );
+    expect(err.message).toContain("(flags: --env)");
+    expect(err.message).not.toContain(SECRET);
   });
 
   it("does not echo an unknown secret subcommand", async () => {
