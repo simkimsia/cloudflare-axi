@@ -141,7 +141,8 @@ const patterns: ErrorPattern[] = [
     pattern: /Worker "[^"]+" not found\./i,
     code: "NOT_FOUND",
     suggestions: [
-      "Run `cloudflare-axi workers secret list --name <worker>` with the exact Worker name",
+      "Run `cloudflare-axi workers deploy --dry-run` in the Worker's directory to see the name its config deploys",
+      "cloudflare-axi cannot list the account's Workers yet; check the exact name under Workers & Pages in the Cloudflare dashboard",
       "A new Worker must be deployed first: `cloudflare-axi workers deploy --name <worker>`",
     ],
   },

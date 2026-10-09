@@ -129,7 +129,7 @@ describe("mapWranglerError", () => {
     const err = mapWranglerError(SECRET_WORKER_NOT_FOUND_STDERR, 1);
     expect(err.code).toBe("NOT_FOUND");
     expect(err.message).toBe('Worker "no-such-worker-xyz-axi" not found.');
-    expect(err.suggestions.join(" ")).toContain("workers secret list --name");
+    expect(err.suggestions.join(" ")).toContain("workers deploy --dry-run");
     expect(err.suggestions).not.toContain(
       "Check the Worker name in your wrangler config",
     );
