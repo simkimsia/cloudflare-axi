@@ -286,6 +286,13 @@ function requireKey(
       [usage],
     );
   }
+  if (key === "." || key === "..") {
+    throw new AxiError(
+      `${key} is not a valid KV key name (Cloudflare KV rejects . and ..)`,
+      "VALIDATION_ERROR",
+      [usage],
+    );
+  }
   return key;
 }
 

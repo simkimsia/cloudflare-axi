@@ -785,6 +785,27 @@ describe("kv delete", () => {
   });
 });
 
+describe("kv dot-segment keys", () => {
+  for (const key of [".", ".."]) {
+    for (const argv of [
+      ["get", key, "--namespace", "SETTINGS"],
+      ["get", "--key", key, "--binding", "SETTINGS"],
+      ["put", key, "--namespace", "SETTINGS", "--file", "x"],
+      ["delete", key, "--namespace", "SETTINGS"],
+    ]) {
+      it(`refuses ${argv.join(" ")} before any call`, async () => {
+        await expectError(
+          kvCommand(argv),
+          "VALIDATION_ERROR",
+          /not a valid KV key name/,
+        );
+        expect(calls).toEqual([]);
+        expect(apiCalls).toEqual([]);
+      });
+    }
+  }
+});
+
 describe("helpers", () => {
   const b = (s: string) => Buffer.from(s);
 
