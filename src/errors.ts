@@ -196,13 +196,25 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    // Real stderr (`wrangler deploy` with no config in cwd): autoconfig on
-    // (default) says "Could not detect a directory containing static files";
-    // --autoconfig=false says "Missing entry-point to Worker script or to
-    // assets directory". `workers deploy` prechecks for a config first, so
-    // this is a backstop.
-    pattern:
-      /Missing entry-point to Worker script|Could not detect a directory containing static files/i,
+    // Real stderr (`wrangler deploy --dry-run --config x` where x has `name`
+    // but neither `main` nor `[assets]`, captured 2026-10-09): "Missing
+    // entry-point to Worker script or to assets directory". wrangler also
+    // prints it with no config and --autoconfig=false, but `workers deploy`
+    // prechecks for a config first, so the config is what is incomplete.
+    pattern: /Missing entry-point to Worker script/i,
+    code: "VALIDATION_ERROR",
+    message: "wrangler config has no entry point",
+    suggestions: [
+      'Add `main = "src/index.ts"` (the Worker script) or an `[assets]` directory to the wrangler config',
+      "Then check it with `cloudflare-axi workers deploy --dry-run`",
+    ],
+  },
+  {
+    // Real stderr (`wrangler deploy` with no config in cwd, autoconfig on by
+    // default): "Could not detect a directory containing static files".
+    // Autoconfig only runs without a config, so this one does mean no
+    // config. `workers deploy` prechecks for a config first: a backstop.
+    pattern: /Could not detect a directory containing static files/i,
     code: "NOT_LINKED",
     message: "No Worker is configured in this directory",
     suggestions: [

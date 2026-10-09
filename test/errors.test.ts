@@ -135,9 +135,19 @@ describe("mapWranglerError", () => {
     );
   });
 
-  it("maps the no-config deploy errors to NOT_LINKED", () => {
-    expect(mapWranglerError(NO_ENTRY_POINT_STDERR, 1).code).toBe("NOT_LINKED");
-    expect(mapWranglerError(NO_STATIC_DIR_STDERR, 1).code).toBe("NOT_LINKED");
+  it("maps a config with no entry point to VALIDATION_ERROR, not NOT_LINKED", () => {
+    const err = mapWranglerError(NO_ENTRY_POINT_STDERR, 1);
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe("wrangler config has no entry point");
+    expect(err.suggestions.join(" ")).toContain('main = "src/index.ts"');
+    expect(err.suggestions.join(" ")).toContain("[assets]");
+    expect(exitCodeForError(err)).toBe(2);
+  });
+
+  it("keeps autoconfig's no-static-dir error (only seen without a config) on NOT_LINKED", () => {
+    const err = mapWranglerError(NO_STATIC_DIR_STDERR, 1);
+    expect(err.code).toBe("NOT_LINKED");
+    expect(err.message).toBe("No Worker is configured in this directory");
   });
 
   it("maps a missing Pages project (deploy and deployment list shapes) to NOT_FOUND with a create hint", () => {

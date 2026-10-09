@@ -14,6 +14,7 @@ import {
   parseBindings,
   parseUploadSize,
   redactValue,
+  shellQuote,
   splitTargets,
   stdinSource,
   toSecretRows,
@@ -277,6 +278,20 @@ describe("redactValue", () => {
   });
 });
 
+describe("shellQuote", () => {
+  it("leaves safe paths bare and single-quotes the rest", () => {
+    expect(shellQuote("/a/b-c_d.e/wrangler.toml")).toBe(
+      "/a/b-c_d.e/wrangler.toml",
+    );
+    expect(shellQuote("/my worker/wrangler.toml")).toBe(
+      "'/my worker/wrangler.toml'",
+    );
+    expect(shellQuote("/it's/$HOME/w.toml")).toBe("'/it'\\''s/$HOME/w.toml'");
+    expect(shellQuote("~/w.toml")).toBe("'~/w.toml'");
+    expect(shellQuote("")).toBe("''");
+  });
+});
+
 describe("findWranglerConfig", () => {
   it("finds a config in the dir or a parent, else undefined", () => {
     const child = join(dir, "src", "deep");
@@ -454,7 +469,7 @@ describe("workers deploy", () => {
     expect(out).not.toContain("[]");
   });
 
-  it("falls back to the stdout version id when the output file has none", async () => {
+  it("falls back to the stdout version id and reports urls/crons as unknown (not none) without a deploy entry", async () => {
     fakeWrangler((args) =>
       args.includes("--dry-run")
         ? { stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }
@@ -468,6 +483,36 @@ describe("workers deploy", () => {
       config,
     ]);
     expect(out).toContain(`version: ${REAL_DEPLOY_ENTRY.version_id}`);
+    expect(out).toMatch(
+      /urls: "?unknown \(wrangler reported no deploy details\)/,
+    );
+    expect(out).toMatch(
+      /crons: "?unknown \(wrangler reported no deploy details\)/,
+    );
+    expect(out).not.toContain("none (workers_dev");
+    expect(out).not.toContain("crons: none");
+    expect(out).toContain("cloudflare-axi deployments");
+  });
+
+  it("reports unknown when the deploy entry has no targets field", async () => {
+    const { targets: _targets, ...entry } = REAL_DEPLOY_ENTRY;
+    fakeWrangler((args) =>
+      args.includes("--dry-run")
+        ? { stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }
+        : {
+            stdout: REAL_DEPLOY_STDOUT,
+            ndjson: `${JSON.stringify(entry)}\n`,
+          },
+    );
+    const out = await workersCommand([
+      "deploy",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      config,
+    ]);
+    expect(out).toMatch(/urls: "?unknown/);
+    expect(out).toMatch(/crons: "?unknown/);
   });
 
   it("is UNKNOWN when wrangler reports no version id", async () => {
@@ -487,6 +532,157 @@ describe("workers deploy", () => {
     );
     expect(err.code).toBe("UNKNOWN");
     expect(err.suggestions.join(" ")).toContain("cloudflare-axi deployments");
+  });
+});
+
+// ---- --config carried into hints ----
+
+describe("--config in follow-up hints", () => {
+  let spaced: string;
+  let quoted: string;
+  beforeEach(() => {
+    const sub = join(dir, "my worker");
+    mkdirSync(sub);
+    spaced = join(sub, "wrangler.toml");
+    writeFileSync(spaced, 'name = "family-haze-bot"\n');
+    quoted = `'${spaced}'`;
+  });
+
+  it("dry run -> real deploy hint carries a plain --config bare", async () => {
+    fakeWrangler(() => ({ stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }));
+    const out = await workersCommand([
+      "deploy",
+      "--dry-run",
+      "--config",
+      config,
+    ]);
+    expect(out).toContain(
+      `workers deploy --name family-haze-bot --config ${config}\``,
+    );
+  });
+
+  it("dry run -> real deploy hint single-quotes a path with spaces", async () => {
+    fakeWrangler(() => ({ stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }));
+    const out = await workersCommand([
+      "deploy",
+      "--dry-run",
+      "--config",
+      spaced,
+    ]);
+    expect(out).toContain(
+      `workers deploy --name family-haze-bot --config ${quoted}\``,
+    );
+  });
+
+  it("omits --config from hints when it was not passed", async () => {
+    fakeWrangler(() => ({ stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    const out = await workersCommand(["deploy", "--dry-run"]);
+    expect(out).toContain("workers deploy --name family-haze-bot`");
+    expect(out).not.toContain("--config");
+  });
+
+  it("real deploy hints carry --config and point deployments at the config's dir", async () => {
+    fakeWrangler((args) =>
+      args.includes("--dry-run")
+        ? { stdout: DRY_RUN_STDOUT, ndjson: DRY_RUN_NDJSON }
+        : { stdout: REAL_DEPLOY_STDOUT, ndjson: REAL_DEPLOY_NDJSON },
+    );
+    const out = await workersCommand([
+      "deploy",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      spaced,
+    ]);
+    expect(out).toContain(
+      `workers secret list --name family-haze-bot --config ${quoted}\``,
+    );
+    expect(out).toContain(`from '${join(dir, "my worker")}'`);
+  });
+
+  it("refusals carry --config: missing --name and a mismatched --name", async () => {
+    const calls = fakeWrangler(() => ({
+      stdout: DRY_RUN_STDOUT,
+      ndjson: DRY_RUN_NDJSON,
+    }));
+    const noName = await failure(
+      workersCommand(["deploy", "--config", spaced]),
+    );
+    expect(noName.suggestions.join(" ")).toContain(
+      `workers deploy --dry-run --config ${quoted}\``,
+    );
+    const mismatch = await failure(
+      workersCommand([
+        "deploy",
+        "--name",
+        "family-haze-bto",
+        "--config",
+        spaced,
+      ]),
+    );
+    expect(mismatch.suggestions.join(" ")).toContain(
+      `workers deploy --name family-haze-bot --config ${quoted}\``,
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a config with no entry point is VALIDATION_ERROR with a --config hint", async () => {
+    fakeWrangler(() => ({
+      stderr:
+        "\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mMissing entry-point to Worker script or to assets directory\u001b[0m\n",
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand(["deploy", "--dry-run", "--config", spaced]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe("wrangler config has no entry point");
+    expect(err.suggestions.join(" ")).toContain('main = "src/index.ts"');
+    expect(err.suggestions.join(" ")).toContain(
+      `workers deploy --dry-run --config ${quoted}\``,
+    );
+  });
+
+  it("secret list hints and mapped errors carry --config", async () => {
+    fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
+    const out = await workersCommand(["secret", "list", "--config", spaced]);
+    expect(out).toContain(`workers deploy --dry-run --config ${quoted}\``);
+    expect(out).toContain(
+      `secret put <KEY> --name <worker> --config ${quoted}\``,
+    );
+
+    vi.mocked(execFile).mockReset();
+    fakeWrangler(() => ({ stderr: WORKER_NOT_FOUND_STDERR, exitCode: 1 }));
+    const err = await failure(
+      workersCommand(["secret", "list", "--name", "x", "--config", spaced]),
+    );
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.suggestions.join(" ")).toContain(
+      `workers deploy --dry-run --config ${quoted}\``,
+    );
+  });
+
+  it("secret put success hint carries --config", async () => {
+    vi.spyOn(stdinSource, "isTTY").mockReturnValue(false);
+    vi.spyOn(stdinSource, "read").mockResolvedValue("v4lue-xyz");
+    fakeWrangler((args) =>
+      args[1] === "list"
+        ? { stdout: SECRET_LIST_JSON }
+        : { stdout: "✨ Success! Uploaded secret API_KEY\n" },
+    );
+    const out = await workersCommand([
+      "secret",
+      "put",
+      "API_KEY",
+      "--name",
+      "family-haze-bot",
+      "--config",
+      spaced,
+    ]);
+    expect(out).toContain(
+      `workers secret list --name family-haze-bot --config ${quoted}\``,
+    );
   });
 });
 

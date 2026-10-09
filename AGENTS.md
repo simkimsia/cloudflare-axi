@@ -61,7 +61,11 @@ the upstream `kunchenguid/axi` repo).
   real deploy that never forwards `--name`), `workers secret list|put`
   (value on stdin only; read-only `secret list` precheck before `put`;
   `stdinSource` is the test seam). Bare `workers` prints its help and points
-  at `deployments`.
+  at `deployments`. A user's `--config` is carried, shell-quoted
+  (`shellQuote`), into every follow-up hint, including mapped wrangler
+  errors (`carryConfig`); `deployments` has no `--config`, so its hint names
+  the config's directory. Without the ND-JSON `deploy` entry (or its
+  `targets`), a real deploy reports urls/crons as `unknown`, never `none`.
 - Commands live in `src/commands/`, return TOON strings via `src/toon.ts`
   helpers; errors render through the `formatError` hook in `src/cli.ts`
   because the SDK's default formatter only recognizes its own AxiError class.
@@ -144,11 +148,13 @@ the upstream `kunchenguid/axi` repo).
   "Binding Resource" table whose parenthesized detail holds var values,
   which `parseBindings` drops).
 - `wrangler deploy` with no config in cwd: autoconfig (default on) fails with
-  "Could not detect a directory containing static files"; with
-  `--autoconfig=false`, "Missing entry-point to Worker script or to assets
-  directory"; a bad `--config` gives "Could not read file: ... ENOENT".
+  "Could not detect a directory containing static files" (backstop,
+  `NOT_LINKED`); a bad `--config` gives "Could not read file: ... ENOENT".
   `workers deploy` prechecks for a config (find-up for wrangler.json /
-  wrangler.jsonc / wrangler.toml) so these are backstops (`NOT_LINKED`).
+  wrangler.jsonc / wrangler.toml). "Missing entry-point to Worker script or
+  to assets directory" comes from a config with `name` but no `main` or
+  `[assets]` (also from no config with `--autoconfig=false`), so it maps to
+  `VALIDATION_ERROR` "wrangler config has no entry point".
 - `wrangler secret list` prints JSON by default (`[{name, type}]`, no
   banner). Missing Worker → 'Worker "x" not found.' (`NOT_FOUND`); no config
   and no `--name` → "Required Worker name missing" (`NOT_LINKED`).
