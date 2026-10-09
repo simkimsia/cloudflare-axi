@@ -71,7 +71,10 @@ the upstream `kunchenguid/axi` repo).
   "Failed to fetch .../values/<key> - 404: Not Found", which is why `kv`
   resolves `--namespace <title|id>` against `kv namespace list` first. An
   unknown `--namespace-id` on `key list` gives "[code: 10013]". `key delete`
-  succeeds on a missing key, so `kv delete` checks with `key get` first.
+  succeeds on a missing key, so `kv put`/`kv delete` check existence with
+  `key list --prefix <key>` and an exact name match (never downloading the
+  value). `kv get` reads through `wranglerExec`, whose 10 MB maxBuffer caps
+  readable values below KV's 25 MiB limit.
   `--binding` resolves through the wrangler config in cwd; writes refuse it
   (VISION.md Safety: the target is named, not inferred).
 - `wrangler kv namespace create <title>` is text-only and prints a

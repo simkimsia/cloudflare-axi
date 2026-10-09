@@ -316,9 +316,8 @@ describe("kv put", () => {
   it("writes a file value and reports a new key as created", async () => {
     const file = join(dir, "v.json");
     writeFileSync(file, '{"on":true}');
-    replies["kv key get flags"] = {
-      code: 1,
-      stderr: KEY_404.replace("missing", "flags"),
+    replies["kv key list"] = {
+      stdout: JSON.stringify([{ name: "flags:old" }]),
     };
     const out = await kvCommand([
       "put",
@@ -348,10 +347,10 @@ describe("kv put", () => {
     expect(out).toContain("ttl: 3600s");
   });
 
-  it("reports an overwrite with the previous size", async () => {
+  it("reports an overwrite, probing by exact name without reading the value", async () => {
     const file = join(dir, "v");
     writeFileSync(file, "new");
-    replies["kv key get feed"] = { stdout: FEED };
+    replies["kv key list"] = { stdout: JSON.stringify([{ name: "feed" }]) };
     const out = await kvCommand([
       "put",
       "feed",
@@ -360,9 +359,18 @@ describe("kv put", () => {
       "--file",
       file,
     ]);
-    expect(out).toContain(
-      `action: overwritten (previous value ${FEED.length} bytes)`,
-    );
+    expect(calls[1]).toEqual([
+      "kv",
+      "key",
+      "list",
+      "--namespace-id",
+      SETTINGS_ID,
+      "--remote",
+      "--prefix",
+      "feed",
+    ]);
+    expect(calls.some((c) => c[2] === "get")).toBe(false);
+    expect(out).toContain("action: overwritten");
   });
 
   it("reads --stdin into a temp file, never argv", async () => {
@@ -372,7 +380,7 @@ describe("kv put", () => {
     vi.spyOn(process, "stdin", "get").mockReturnValue(
       stdin as unknown as typeof process.stdin,
     );
-    replies["kv key get k"] = { code: 1, stderr: KEY_404 };
+    replies["kv key list"] = { stdout: "[]" };
     const out = await kvCommand([
       "put",
       "k",
@@ -442,7 +450,9 @@ describe("kv put", () => {
 
 describe("kv delete", () => {
   it("deletes an existing key and says what it removed", async () => {
-    replies["kv key get feed"] = { stdout: FEED };
+    replies["kv key list"] = {
+      stdout: JSON.stringify([{ name: "feed" }, { name: "feed:old" }]),
+    };
     const out = await kvCommand(["delete", "feed", "--namespace", "SETTINGS"]);
     expect(calls.at(-1)).toEqual([
       "kv",
@@ -453,11 +463,14 @@ describe("kv delete", () => {
       SETTINGS_ID,
       "--remote",
     ]);
-    expect(out).toContain(`action: deleted (was ${FEED.length} bytes)`);
+    expect(calls.some((c) => c[2] === "get")).toBe(false);
+    expect(out).toContain("action: deleted");
   });
 
   it("refuses a missing key without calling delete", async () => {
-    replies["kv key get missing"] = { code: 1, stderr: KEY_404 };
+    replies["kv key list"] = {
+      stdout: JSON.stringify([{ name: "missing:1" }]),
+    };
     await expectError(
       kvCommand(["delete", "missing", "--namespace", "SETTINGS"]),
       "NOT_FOUND",
@@ -492,6 +505,17 @@ describe("helpers", () => {
     expect(classifyValue("{not json").format).toBe("text");
     expect(classifyValue("a\tb\r\n").format).toBe("text");
     expect(classifyValue("\u0000").format).toBe("binary");
+  });
+
+  it("shows JSON as stored text when parsing would change it", () => {
+    const big = '{"id":12345678901234567890}';
+    expect(classifyValue(big)).toEqual({ format: "text", text: big });
+    const dup = '{"a":1,"a":2}';
+    expect(classifyValue(dup)).toEqual({ format: "text", text: dup });
+    expect(classifyValue('{ "s": "a  b",\n "n": [1, 2] }')).toEqual({
+      format: "json",
+      text: '{\n  "s": "a  b",\n  "n": [\n    1,\n    2\n  ]\n}',
+    });
   });
 
   it("truncates on a line boundary", () => {

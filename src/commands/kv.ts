@@ -350,15 +350,23 @@ export function classifyValue(raw: string): {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
-      return {
-        format: "json",
-        text: JSON.stringify(JSON.parse(trimmed), null, 2),
-      };
+      const parsed: unknown = JSON.parse(trimmed);
+      if (JSON.stringify(parsed) === stripJsonWhitespace(trimmed)) {
+        return { format: "json", text: JSON.stringify(parsed, null, 2) };
+      }
     } catch {
       // not JSON; fall through to text
     }
   }
   return { format: "text", text: raw };
+}
+
+/** Drop whitespace outside JSON string literals. */
+function stripJsonWhitespace(json: string): string {
+  return json.replace(
+    /("(?:[^"\\]|\\.)*")|\s+/g,
+    (_m, str?: string) => str ?? "",
+  );
 }
 
 /** Cut at the last line break before `limit` chars so lines stay whole. */
@@ -386,19 +394,20 @@ function fetchValue(key: string, target: KvTarget): Promise<string> {
   return wranglerExec(["kv", "key", "get", key, ...targetArgs(target)]);
 }
 
-/** Byte size of a fetched value, or undefined when the key does not exist. */
-async function probeSize(
+/** Whether a key exists, from an exact-name match in a prefix listing (never downloads the value). */
+async function keyExists(
   key: string,
-  target: KvTarget,
-): Promise<number | undefined> {
-  try {
-    return Buffer.byteLength(await fetchValue(key, target), "utf8");
-  } catch (error) {
-    if (error instanceof AxiError && error.code === "NOT_FOUND") {
-      return undefined;
-    }
-    throw error;
-  }
+  target: NamespaceTarget,
+): Promise<boolean> {
+  const keys = await wranglerJson<KvKey[]>([
+    "kv",
+    "key",
+    "list",
+    ...targetArgs(target),
+    "--prefix",
+    key,
+  ]);
+  return keys.some((k) => k.name === key);
 }
 
 async function getValue(args: string[]): Promise<string> {
@@ -503,27 +512,27 @@ async function putValue(args: string[]): Promise<string> {
   const target = await writeTarget(namespace, binding, "put", USAGE.put);
 
   let tempDir: string | undefined;
-  let path: string;
-  let size: number;
-  if (file !== undefined) {
-    const info = await stat(file).catch(() => undefined);
-    if (!info?.isFile()) {
-      throw new AxiError(`${file} is not a file`, "VALIDATION_ERROR", [
-        USAGE.put,
-      ]);
-    }
-    path = file;
-    size = info.size;
-  } else {
-    const value = await readStdin();
-    tempDir = await mkdtemp(join(tmpdir(), "cloudflare-axi-kv-"));
-    path = join(tempDir, "value");
-    await writeFile(path, value, { mode: 0o600 });
-    size = value.length;
-  }
-
   try {
-    const previous = await probeSize(key, target);
+    let path: string;
+    let size: number;
+    if (file !== undefined) {
+      const info = await stat(file).catch(() => undefined);
+      if (!info?.isFile()) {
+        throw new AxiError(`${file} is not a file`, "VALIDATION_ERROR", [
+          USAGE.put,
+        ]);
+      }
+      path = file;
+      size = info.size;
+    } else {
+      const value = await readStdin();
+      tempDir = await mkdtemp(join(tmpdir(), "cloudflare-axi-kv-"));
+      path = join(tempDir, "value");
+      await writeFile(path, value, { mode: 0o600 });
+      size = value.length;
+    }
+
+    const existed = await keyExists(key, target);
     await wranglerExec([
       "kv",
       "key",
@@ -538,10 +547,7 @@ async function putValue(args: string[]): Promise<string> {
       encode({
         key,
         namespace: targetLabel(target),
-        action:
-          previous === undefined
-            ? "created"
-            : `overwritten (previous value ${previous} bytes)`,
+        action: existed ? "overwritten" : "created",
         size: `${size} bytes`,
         ttl: ttl !== undefined ? `${ttl}s` : "none",
       }),
@@ -565,8 +571,7 @@ async function deleteKey(args: string[]): Promise<string> {
 
   // wrangler's delete succeeds on a missing key; check first so the output
   // never claims a deletion that did not happen.
-  const previous = await probeSize(key, target);
-  if (previous === undefined) {
+  if (!(await keyExists(key, target))) {
     throw new AxiError(
       `key ${key} not found in KV namespace ${target.title}; nothing deleted`,
       "NOT_FOUND",
@@ -581,7 +586,7 @@ async function deleteKey(args: string[]): Promise<string> {
     encode({
       key,
       namespace: targetLabel(target),
-      action: `deleted (was ${previous} bytes)`,
+      action: "deleted",
     }),
     renderHelp([
       `Run \`cloudflare-axi kv keys ${target.title}\` to see the remaining keys (listings can lag up to 60s)`,
