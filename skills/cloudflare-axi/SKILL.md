@@ -34,7 +34,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (KV namespaces), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (list namespaces; `kv create <title>`, `kv keys <namespace>`, `kv get <key> --namespace <title|id>` or `--binding <NAME>`, `kv put <key> --namespace <title|id> --file <path>|--stdin`, `kv delete <key> --namespace <title|id>`; always the remote store), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
 
 ## When cloudflare-axi cannot do it
 
@@ -42,7 +42,7 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
    Rerun with `AXI_DEBUG=1` to print each forwarded `wrangler` argv and REST method and path to stderr.
 2. If the error is `VALIDATION_ERROR` with `Unknown command`, or the command
    exists but lacks the flag you need, fall back to raw `wrangler` and finish
-   the user's task. Examples: `wrangler kv key list --namespace-id <id>`, `wrangler tail`.
+   the user's task. Examples: `wrangler kv bulk put <file> --namespace-id <id>`, `wrangler tail`.
    For products wrangler does not cover (Email Routing writes, DNS records),
    fall back to the REST API with `curl` and `CLOUDFLARE_API_TOKEN` or the
    wrangler OAuth token; `cloudflare-axi email --help` says where that token lives.
@@ -87,10 +87,10 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
 
 ## Writes
 
-`pages create` and `pages deploy` are the only write commands so far. `pages deploy` defaults to `--branch main`, which is a production deploy; pass another `--branch` for a preview. It refuses a missing or empty directory before calling wrangler.
+Write commands: `pages create`, `pages deploy`, `kv create`, `kv put` and `kv delete`, plus the `email` writes above. `kv put` and `kv delete` need `--namespace <title|id>` named in full (`--binding` is refused for writes); `kv put` takes the value from `--file` or `--stdin`, never argv, and says whether it created or overwrote the key; `kv delete` refuses a key that does not exist. `pages deploy` defaults to `--branch main`, which is a production deploy; pass another `--branch` for a preview. It refuses a missing or empty directory before calling wrangler.
 
 ## Deliberately not wrapped (do not file)
 
-Other mutating commands: `wrangler deploy`, `wrangler kv key put/delete`, `wrangler delete`, `wrangler pages project delete`, `wrangler secret put`, `wrangler d1 execute` with writes.
+Other mutating commands: `wrangler deploy`, `wrangler delete`, `wrangler pages project delete`, `wrangler secret put`, `wrangler d1 execute` with writes.
 These are excluded by design in v0. Use `wrangler` directly, tell the user
 you did so, and do not open an issue for them.

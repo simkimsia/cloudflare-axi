@@ -62,7 +62,24 @@ the upstream `kunchenguid/axi` repo).
   ("Project Name", "Last Modified" as pre-rendered relative time), not API
   field names.
 - `wrangler kv namespace list` always emits raw JSON; there is no `--json`
-  flag (passing one is an error).
+  flag (passing one is an error). `wrangler kv key list` is the same
+  (`[{name, expiration?, metadata?}]`, all pages fetched).
+- `wrangler kv key list/get/put/delete` default to LOCAL storage (an empty
+  local list returns `[]`, not an error), so every `kv` subcommand passes
+  `--remote`. `key get` writes the raw value to stdout with no banner and no
+  trailing newline; a missing key AND a missing namespace both give
+  "Failed to fetch .../values/<key> - 404: Not Found", which is why `kv`
+  resolves `--namespace <title|id>` against `kv namespace list` first. An
+  unknown `--namespace-id` on `key list` gives "[code: 10013]". `key delete`
+  succeeds on a missing key, so `kv delete` checks with `key get` first.
+  `--binding` resolves through the wrangler config in cwd; writes refuse it
+  (VISION.md Safety: the target is named, not inferred).
+- `wrangler kv namespace create <title>` is text-only and prints a
+  `[[kv_namespaces]]` snippet with the new id (TOML or JSON by the cwd config
+  format). With a wrangler.jsonc in cwd it may offer to patch the config, so
+  `kv create` passes `--update-config=false`. Not run live by this repo's
+  checks (output taken from the wrangler 4.127.1 source); a taken title →
+  'A KV namespace with the title "x" already exists.' → `ALREADY_EXISTS`.
 - `wrangler pages deployment list --project-name <n> --json` has the same
   display-key quirk, and its `Status` field is a pre-rendered relative time
   ("1 day ago"), not a status. Newest first. Missing project → "Project not

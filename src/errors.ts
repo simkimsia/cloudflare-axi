@@ -122,6 +122,54 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
+    // Real stderr (`wrangler kv key get` for a missing key, captured
+    // 2026-10-09): "Failed to fetch https://api.cloudflare.com/client/v4/
+    // accounts/<a>/storage/kv/namespaces/<ns>/values/<key> - 404: Not Found".
+    // A missing namespace gives the same 404; `kv get` resolves the
+    // namespace first, so here it means the key.
+    pattern: /\/storage\/kv\/namespaces\/[^/\s]+\/values\/\S* - 404/i,
+    code: "NOT_FOUND",
+    message: "KV key not found in this namespace",
+    suggestions: [
+      "Run `cloudflare-axi kv keys <namespace> --prefix <start of key>` to check the exact key name (case-sensitive)",
+      "A key written in the last 60s may not be visible yet",
+    ],
+  },
+  {
+    // Real stderr (`wrangler kv key list --namespace-id <unknown>`):
+    // "get namespace: 'namespace not found' [code: 10013]".
+    pattern: /\[code: 10013\]|'namespace not found'/i,
+    code: "NOT_FOUND",
+    message: "KV namespace not found in this account",
+    suggestions: ["Run `cloudflare-axi kv` to list namespaces (title, id)"],
+  },
+  {
+    // Real stderr (`--binding` with no matching config, captured
+    // 2026-10-09): 'No KV namespace with binding "X" was found in the
+    // "kv_namespaces" section of your wrangler config.' / "No KV namespaces
+    // are configured in your wrangler config file."
+    pattern:
+      /No KV namespace with binding "[^"]+" was found|No KV namespaces are configured/i,
+    code: "NOT_LINKED",
+    message:
+      "--binding matched no kv_namespaces entry in the wrangler config in cwd",
+    suggestions: [
+      "--binding reads the wrangler config in cwd; run from the Worker's directory",
+      "Or pass --namespace <title|id>; `cloudflare-axi kv` lists them",
+    ],
+  },
+  {
+    // wrangler 4.127.1 source (kv namespace create, API code 10014): 'A KV
+    // namespace with the title "x" already exists.'
+    pattern: /A KV namespace with the title "[^"]+" already exists/i,
+    code: "ALREADY_EXISTS",
+    message: "A KV namespace with this title already exists in this account",
+    suggestions: [
+      "Run `cloudflare-axi kv` to see its id",
+      "Or pick a different title",
+    ],
+  },
+  {
     // Real stderr: "This Worker does not exist on your account.
     // [code: 10007]".
     pattern: /does not exist on your account|\[code: 10007\]|not found/i,

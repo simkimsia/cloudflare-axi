@@ -10,8 +10,9 @@ reference implementation [`gh-axi`](https://github.com/kunchenguid/gh-axi).
 
 ## Status
 
-Early scaffold (v0). Read commands, plus the first write commands on Pages
-(`pages create`, `pages deploy`). Writes are explicit verbs that name their
+Early scaffold (v0). Read commands, plus write commands on Pages
+(`pages create`, `pages deploy`), Workers KV (`kv create`, `kv put`,
+`kv delete`) and Email Routing. Writes are explicit verbs that name their
 target in full and print what changed; nothing is inferred from context.
 
 ## Requirements
@@ -57,6 +58,11 @@ cloudflare-axi pages create <name> [--production-branch main]
 cloudflare-axi pages deploy <dir> --project <name> [--branch main]   # default branch main = production
 cloudflare-axi pages deployments <name> [--environment production|preview]
 cloudflare-axi kv           # all Workers KV namespaces in your account
+cloudflare-axi kv create SETTINGS                       # new namespace; prints the binding to add to wrangler.toml
+cloudflare-axi kv keys SETTINGS [--prefix user:]        # keys in a namespace (title or id; or --binding NAME)
+cloudflare-axi kv get feed --namespace SETTINGS         # value (JSON pretty-printed), truncated unless --full
+cloudflare-axi kv put feed --namespace SETTINGS --file ./feed.json [--ttl 3600]   # or pipe it in with --stdin
+cloudflare-axi kv delete feed --namespace SETTINGS      # refuses a key that does not exist
 cloudflare-axi whoami       # logged-in Cloudflare account
 cloudflare-axi email --zone example.com            # Email Routing status, destinations, rules
 cloudflare-axi email dns --zone example.com        # MX/SPF/DKIM Cloudflare expects vs live DNS
