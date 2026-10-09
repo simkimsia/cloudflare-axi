@@ -43,7 +43,7 @@ flags{delete}:
   --namespace <title|id> (required)
 notes:
   put and delete need --namespace named in full (title or id); --binding is refused for writes because it depends on the cwd's wrangler config
-  a key starting with - can be read with --namespace, but put, delete and get --binding refuse it (wrangler reads it as a flag)
+  a key starting with - can be read with --namespace, but put, delete and get --binding refuse it (wrangler reads it as a flag); likewise keys --binding refuses a --prefix starting with -
   put prints whether it created the key or overwrote an existing value; delete refuses a key that does not exist
   KV is eventually consistent: a read can lag a write by up to 60s
 examples:
@@ -438,6 +438,16 @@ async function listBindingKeys(
   prefix: string | undefined,
   limit: number,
 ): Promise<{ keys: KvKey[]; more: boolean }> {
+  if (prefix?.startsWith("-")) {
+    throw new AxiError(
+      `\`kv keys --binding\` cannot take prefix ${prefix}: wrangler reads a value starting with - as a flag, so cloudflare-axi refuses it rather than list unfiltered keys`,
+      "VALIDATION_ERROR",
+      [
+        `Pass --namespace <title|id> instead (it lists over REST): cloudflare-axi kv keys --namespace <title|id> ${prefixArg(prefix)}`,
+        "`cloudflare-axi kv` lists namespaces",
+      ],
+    );
+  }
   let stdout: Buffer;
   try {
     stdout = await wranglerBytes([

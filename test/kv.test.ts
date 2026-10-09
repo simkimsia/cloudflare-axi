@@ -347,6 +347,18 @@ describe("kv keys", () => {
     expect(error.suggestions[0]).toContain("Pass --namespace <title|id>");
   });
 
+  it("refuses a dash-prefixed --prefix through --binding before calling wrangler", async () => {
+    const error = await expectError(
+      kvCommand(["keys", "--binding", "SETTINGS", "--prefix=-feed"]),
+      "VALIDATION_ERROR",
+      /wrangler reads a value starting with - as a flag/,
+    );
+    expect(error.suggestions[0]).toContain(
+      "kv keys --namespace <title|id> --prefix=-feed",
+    );
+    expect(calls).toEqual([]);
+  });
+
   it("reports an unknown namespace as NOT_FOUND before listing", async () => {
     await expectError(
       kvCommand(["keys", "settings"]),
