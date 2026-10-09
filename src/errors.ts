@@ -122,6 +122,45 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
+    // Real stderr (`wrangler secret list` with no config and no --name,
+    // captured 2026-10-09): "Required Worker name missing. Please specify
+    // the Worker name in your Wrangler configuration file, or pass it as an
+    // argument with `--name <worker-name>`".
+    pattern: /Required Worker name missing/i,
+    code: "NOT_LINKED",
+    message: "No Worker is configured in this directory",
+    suggestions: [
+      "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
+      "Or pass `--name <worker>`",
+    ],
+  },
+  {
+    // Real stderr (`wrangler secret list --name x` for a missing Worker,
+    // captured 2026-10-09): 'Worker "x" not found.' then "If this is a new
+    // Worker, run `wrangler deploy` first to create it."
+    pattern: /Worker "[^"]+" not found\./i,
+    code: "NOT_FOUND",
+    suggestions: [
+      "Run `cloudflare-axi workers secret list --name <worker>` with the exact Worker name",
+      "A new Worker must be deployed first: `cloudflare-axi workers deploy --name <worker>`",
+    ],
+  },
+  {
+    // Real stderr (`wrangler deploy` with no config in cwd): autoconfig on
+    // (default) says "Could not detect a directory containing static files";
+    // --autoconfig=false says "Missing entry-point to Worker script or to
+    // assets directory". `workers deploy` prechecks for a config first, so
+    // this is a backstop.
+    pattern:
+      /Missing entry-point to Worker script|Could not detect a directory containing static files/i,
+    code: "NOT_LINKED",
+    message: "No Worker is configured in this directory",
+    suggestions: [
+      "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
+      "Or pass `--config <path>` to the Worker's wrangler config",
+    ],
+  },
+  {
     // Real stderr: "This Worker does not exist on your account.
     // [code: 10007]".
     pattern: /does not exist on your account|\[code: 10007\]|not found/i,

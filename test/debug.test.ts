@@ -40,6 +40,15 @@ describe("AXI_DEBUG", () => {
     ]);
   });
 
+  it("prints a secret put argv with KEY and --name; the value never reaches argv", () => {
+    vi.stubEnv("AXI_DEBUG", "1");
+    const { lines } = captureStderr();
+    debugWrangler(["secret", "put", "API_KEY", "--name", "my-worker"]);
+    expect(lines).toEqual([
+      "[axi-debug] wrangler secret put API_KEY --name my-worker\n",
+    ]);
+  });
+
   it("prints nothing when AXI_DEBUG is unset or not 1", () => {
     const { lines } = captureStderr();
     vi.stubEnv("AXI_DEBUG", "");

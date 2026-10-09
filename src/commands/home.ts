@@ -24,6 +24,7 @@ export async function homeCommand(): Promise<string> {
       renderList("deployments", rows),
       renderHelp([
         "Run `cloudflare-axi deployments` for the full deployment list",
+        "Run `cloudflare-axi workers deploy --dry-run` to bundle-check it",
         "Run `cloudflare-axi pages` or `cloudflare-axi kv` for account-wide views",
       ]),
     ]);
