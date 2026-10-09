@@ -15,14 +15,13 @@ import {
   wranglerJson,
   type WranglerOutputEntry,
 } from "../wrangler.js";
-import { toDeploymentRows, type WranglerDeployment } from "./deployments.js";
 
 export const WORKERS_HELP = `usage: cloudflare-axi workers [subcommand] [flags]
-Cloudflare Workers: recent deployments of the Worker in cwd, deploy it, and manage its secrets.
-subcommands[3]:
-  (none)=recent deployments of the Worker configured in cwd, deploy, secret put <KEY>|list
+Cloudflare Workers: deploy the Worker in cwd and manage its secrets.
+subcommands[2]:
+  deploy, secret put <KEY>|list
 flags{deploy}:
-  --name <worker> (required unless --dry-run; must match the Worker the config deploys; never forwarded), --config <path>, --outdir <dir>, --message <text>, --dry-run
+  --name <worker> (required unless --dry-run; must match the Worker the config deploys; never forwarded), --config <path>, --outdir <dir>, --dry-run
 flags{secret}:
   --name <worker> (required for put), --config <path>
 notes:
@@ -32,9 +31,9 @@ notes:
   secret put reads the value from stdin only; it never takes it as an argument and never prints it
   secret put refuses a Worker that does not exist (wrangler would silently create a draft Worker)
   secret list shows names and types only; Cloudflare never returns secret values
+  recent deployments: \`cloudflare-axi deployments\`
   not wrapped yet: tail, secret delete, secret bulk, --env; use \`wrangler\` for those
 examples:
-  cloudflare-axi workers
   cloudflare-axi workers deploy --dry-run
   cloudflare-axi workers deploy --name family-haze-bot
   cloudflare-axi workers secret list --name family-haze-bot
@@ -43,7 +42,7 @@ examples:
 
 const USAGE = {
   deploy:
-    "cloudflare-axi workers deploy --name <worker> [--config <path>] [--outdir <dir>] [--message <text>] [--dry-run]",
+    "cloudflare-axi workers deploy --name <worker> [--config <path>] [--outdir <dir>] [--dry-run]",
   put: 'printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name <worker> [--config <path>]',
   list: "cloudflare-axi workers secret list [--name <worker>] [--config <path>]",
 };
@@ -169,38 +168,6 @@ export const stdinSource = {
   },
 };
 
-// ---- bare `workers` ----
-
-async function listDeployments(args: string[]): Promise<string> {
-  assertNoArgs("workers", args);
-  const deployments = await wranglerJson<WranglerDeployment[]>([
-    "deployments",
-    "list",
-    "--json",
-  ]);
-  const help = [
-    "Run `cloudflare-axi workers deploy --dry-run` to bundle-check it",
-    "Run `cloudflare-axi workers secret list` for its secrets",
-  ];
-  if (deployments.length === 0) {
-    return renderOutput([
-      "deployments: 0 deployments found for this Worker",
-      renderHelp(help),
-    ]);
-  }
-  const rows = toDeploymentRows([...deployments].reverse()).slice(0, 5);
-  return renderOutput([
-    `count: ${rows.length} of ${deployments.length} deployments (newest first)`,
-    renderList("deployments", rows),
-    renderHelp([
-      ...(deployments.length > rows.length
-        ? ["Run `cloudflare-axi deployments` for the full list"]
-        : []),
-      ...help,
-    ]),
-  ]);
-}
-
 // ---- deploy ----
 
 function assertConfig(config: string | undefined): void {
@@ -225,16 +192,8 @@ async function deploy(args: string[]): Promise<string> {
   const name = takeFlag(args, "--name");
   const config = takeFlag(args, "--config");
   const outdir = takeFlag(args, "--outdir");
-  const message = takeFlag(args, "--message");
   const dryRun = takeBoolFlag(args, "--dry-run");
   rejectExtraArgs("workers deploy", args, USAGE.deploy);
-  if (dryRun && message) {
-    throw new AxiError(
-      "--message has no effect with --dry-run",
-      "VALIDATION_ERROR",
-      [USAGE.deploy],
-    );
-  }
 
   assertConfig(config);
   if (!dryRun && !name) {
@@ -305,7 +264,6 @@ async function deploy(args: string[]): Promise<string> {
     "deploy",
     ...configArgs,
     ...outdirArgs,
-    ...(message ? ["--message", message] : []),
   ]);
   const elapsed = `${((Date.now() - started) / 1000).toFixed(1)}s`;
   const entry = lastDeployEntry(result.entries);
@@ -553,14 +511,20 @@ export async function workersCommand(args: string[]): Promise<string> {
   const rest = [...args];
   const first = rest[0];
   if (first === undefined || first.startsWith("-")) {
-    return listDeployments(rest);
+    assertNoArgs("workers", rest);
+    return renderOutput([
+      WORKERS_HELP.trimEnd(),
+      renderHelp([
+        "Run `cloudflare-axi deployments` for recent deployments of the Worker in cwd",
+      ]),
+    ]);
   }
   if (!(SUBCOMMANDS as readonly string[]).includes(first)) {
     throw new AxiError(
       `unknown subcommand ${first} for \`workers\``,
       "VALIDATION_ERROR",
       [
-        `subcommands: ${SUBCOMMANDS.join(", ")} (or none for recent deployments)`,
+        `subcommands: ${SUBCOMMANDS.join(", ")}`,
         "cloudflare-axi workers --help",
       ],
     );

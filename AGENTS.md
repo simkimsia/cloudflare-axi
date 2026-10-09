@@ -55,7 +55,8 @@ the upstream `kunchenguid/axi` repo).
 - `src/commands/workers.ts` — `workers deploy` (dry-run name check, then a
   real deploy that never forwards `--name`), `workers secret list|put`
   (value on stdin only; read-only `secret list` precheck before `put`;
-  `stdinSource` is the test seam), and bare `workers` (recent deployments).
+  `stdinSource` is the test seam). Bare `workers` prints its help and points
+  at `deployments`.
 - Commands live in `src/commands/`, return TOON strings via `src/toon.ts`
   helpers; errors render through the `formatError` hook in `src/cli.ts`
   because the SDK's default formatter only recognizes its own AxiError class.

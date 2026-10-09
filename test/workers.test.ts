@@ -298,6 +298,15 @@ describe("findWranglerConfig", () => {
 // ---- deploy ----
 
 describe("workers deploy", () => {
+  it("rejects --message on deploy as an unknown flag", async () => {
+    fakeWrangler(() => ({}));
+    const err = await failure(
+      workersCommand(["deploy", "--dry-run", "--message", "x"]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("--message");
+  });
+
   it("refuses a real deploy without --name before spawning wrangler", async () => {
     const calls = fakeWrangler(() => ({}));
     const err = await failure(workersCommand(["deploy", "--config", config]));
@@ -406,12 +415,10 @@ describe("workers deploy", () => {
       "family-haze-bot",
       "--config",
       config,
-      "--message",
-      "ship it",
     ]);
     expect(calls.map((c) => c.args)).toEqual([
       ["deploy", "--dry-run", "--config", config],
-      ["deploy", "--config", config, "--message", "ship it"],
+      ["deploy", "--config", config],
     ]);
     for (const c of calls) {
       expect(c.args).not.toContain("--name");
@@ -693,21 +700,14 @@ describe("workers (bare)", () => {
     );
   });
 
-  it("shows recent deployments plus deploy/secret hints", async () => {
-    fakeWrangler(() => ({
-      stdout: JSON.stringify([
-        {
-          id: "d1",
-          source: "wrangler",
-          author_email: "me@example.com",
-          created_on: new Date().toISOString(),
-          annotations: { "workers/message": "first" },
-        },
-      ]),
-    }));
+  it("prints the workers help and points at `deployments` without calling wrangler", async () => {
+    const calls = fakeWrangler(() => ({}));
     const out = await workersCommand([]);
-    expect(out).toContain("count: 1 of 1 deployments");
-    expect(out).toContain("workers deploy --dry-run");
-    expect(out).toContain("workers secret list");
+    expect(calls).toEqual([]);
+    expect(out).toContain("usage: cloudflare-axi workers");
+    expect(out).toContain("deploy, secret put <KEY>|list");
+    expect(out).toContain(
+      "Run `cloudflare-axi deployments` for recent deployments",
+    );
   });
 });
