@@ -18,10 +18,15 @@ the upstream `kunchenguid/axi` repo).
   `src/version.ts` must stay a LEAF module (node builtins only) or the fast
   path silently stops being fast.
 - `src/wrangler.ts` — sole place that spawns the `wrangler` binary
-  (`wranglerJson` / `wranglerExec`; `wranglerBytes` for undecoded stdout with
-  a 32 MiB buffer and a distinct `WranglerOutputTooLargeError`). Non-zero exits route through
+  (`wranglerJson` / `wranglerExec`, both taking optional `{ input, env }`;
+  `wranglerBytes` for undecoded stdout with a 32 MiB buffer and a distinct
+  `WranglerOutputTooLargeError`). Non-zero exits route through
   `mapWranglerError`; a missing binary maps to `WRANGLER_NOT_INSTALLED`.
-  `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner.
+  `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner. `run`
+  always closes the child's stdin (writing `input` when given) so wrangler
+  never waits on it. `wranglerExecWithOutput` points
+  `WRANGLER_OUTPUT_FILE_PATH` at a private temp file and returns its parsed
+  ND-JSON entries (`parseOutputEntries`) next to stdout.
 - `src/debug.ts` — `AXI_DEBUG=1` prints each wrangler argv (from `run` in
   `src/wrangler.ts`) and each REST method and path (from `cfRequest`) to
   stderr, with `CLOUDFLARE_API_TOKEN` masked. Never headers or bodies.
@@ -52,6 +57,10 @@ the upstream `kunchenguid/axi` repo).
   `rejectExtraArgs`, which names every leftover token with exit code 2
   (AXI §6). Take value flags before positionals so a flag's value is never
   mistaken for a positional.
+- `src/commands/workers.ts` — `workers deploy` (dry-run name check, then a
+  real deploy that never forwards `--name`), `workers secret list|put`
+  (value on stdin only; read-only `secret list` precheck before `put`;
+  `stdinSource` is the test seam), and bare `workers` (recent deployments).
 - Commands live in `src/commands/`, return TOON strings via `src/toon.ts`
   helpers; errors render through the `formatError` hook in `src/cli.ts`
   because the SDK's default formatter only recognizes its own AxiError class.
@@ -124,6 +133,33 @@ the upstream `kunchenguid/axi` repo).
   trailing `🪵 Logs were written to ...` line. Non-interactive with no
   credentials: "In a non-interactive environment, it's necessary to set a
   CLOUDFLARE_API_TOKEN environment variable for wrangler to work."
+- `WRANGLER_OUTPUT_FILE_PATH=<file>` makes wrangler append ND-JSON lines:
+  `wrangler-session`, then `deploy` (`worker_name`, `version_id`,
+  `worker_tag`, `targets`, `worker_name_overridden`; `version_id` is null on
+  `--dry-run`), or `command-failed` (`code`, `message`). `targets` is a
+  string[]: workers.dev URLs (with https://), route patterns, custom domains,
+  `schedule: <cron>`, `Producer for <queue>`, `workflow: <name>`. Bindings
+  and the "Total Upload: X / gzip: Y" size appear only in stdout (a
+  "Binding Resource" table whose parenthesized detail holds var values,
+  which `parseBindings` drops).
+- `wrangler deploy` with no config in cwd: autoconfig (default on) fails with
+  "Could not detect a directory containing static files"; with
+  `--autoconfig=false`, "Missing entry-point to Worker script or to assets
+  directory"; a bad `--config` gives "Could not read file: ... ENOENT".
+  `workers deploy` prechecks for a config (find-up for wrangler.json /
+  wrangler.jsonc / wrangler.toml) so these are backstops (`NOT_LINKED`).
+- `wrangler secret list` prints JSON by default (`[{name, type}]`, no
+  banner). Missing Worker → 'Worker "x" not found.' (`NOT_FOUND`); no config
+  and no `--name` → "Required Worker name missing" (`NOT_LINKED`).
+- `wrangler secret put <KEY>` reads the value from a non-TTY stdin and
+  `trimEnd()`s it. Quirk: on a missing Worker it calls `createDraftWorker`
+  and silently creates one, which is why `workers secret put` runs a
+  read-only `secret list --name` first. Success line: "✨ Success! Uploaded
+  secret <KEY>".
+- Workers write paths (real `deploy`, `secret put`) are unit-tested only;
+  live smoke covers `workers deploy --dry-run`, `secret list`, the `--name`
+  mismatch refusal and the `secret put` NOT_FOUND precheck (2026-10-09,
+  family-haze-bot). Never smoke a real deploy or put against a live Worker.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`

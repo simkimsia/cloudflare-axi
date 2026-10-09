@@ -62,6 +62,27 @@ const PAGES_PROJECT_EXISTS_STDERR = `${ERR(
 
   A project with this name already exists. Choose a different project name. [code: 8000002]`;
 
+// Real wrangler 4.127.1 stderr from the Workers secret/deploy paths,
+// captured live 2026-10-09.
+const REQUIRED_NAME_MISSING_STDERR = ERR(
+  "Required Worker name missing. Please specify the Worker name in your Wrangler configuration file, or pass it as an argument with `--name <worker-name>`",
+);
+
+const SECRET_WORKER_NOT_FOUND_STDERR = `${ERR(
+  'Worker "no-such-worker-xyz-axi" not found.',
+)}
+
+  If this is a new Worker, run \`wrangler deploy\` first to create it.
+  Otherwise, check that the Worker name is correct and you're logged into the right account.`;
+
+const NO_ENTRY_POINT_STDERR = ERR(
+  "Missing entry-point to Worker script or to assets directory",
+);
+
+const NO_STATIC_DIR_STDERR = ERR(
+  "Could not detect a directory containing static files (e.g. html, css and js) for the project",
+);
+
 describe("stripAnsi", () => {
   it("removes wrangler's color escapes", () => {
     expect(stripAnsi("[31m✘ [1mboom[0m")).toBe("✘ boom");
@@ -96,6 +117,27 @@ describe("mapWranglerError", () => {
   it("maps a nonexistent Worker (code 10007) to NOT_FOUND", () => {
     const err = mapWranglerError(WORKER_NOT_FOUND_STDERR, 1);
     expect(err.code).toBe("NOT_FOUND");
+  });
+
+  it("maps 'Required Worker name missing' to NOT_LINKED with a --name hint", () => {
+    const err = mapWranglerError(REQUIRED_NAME_MISSING_STDERR, 1);
+    expect(err.code).toBe("NOT_LINKED");
+    expect(err.suggestions.join(" ")).toContain("--name <worker>");
+  });
+
+  it("maps 'Worker \"x\" not found.' to NOT_FOUND with the workers suggestion, not the generic one", () => {
+    const err = mapWranglerError(SECRET_WORKER_NOT_FOUND_STDERR, 1);
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.message).toBe('Worker "no-such-worker-xyz-axi" not found.');
+    expect(err.suggestions.join(" ")).toContain("workers secret list --name");
+    expect(err.suggestions).not.toContain(
+      "Check the Worker name in your wrangler config",
+    );
+  });
+
+  it("maps the no-config deploy errors to NOT_LINKED", () => {
+    expect(mapWranglerError(NO_ENTRY_POINT_STDERR, 1).code).toBe("NOT_LINKED");
+    expect(mapWranglerError(NO_STATIC_DIR_STDERR, 1).code).toBe("NOT_LINKED");
   });
 
   it("maps a missing Pages project (deploy and deployment list shapes) to NOT_FOUND with a create hint", () => {

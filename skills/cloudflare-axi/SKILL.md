@@ -1,6 +1,6 @@
 ---
 name: cloudflare-axi
-description: "Operate Cloudflare through the cloudflare-axi CLI - Workers deployments, Pages projects, KV namespaces, Email Routing, and account identity. Use whenever a task touches Cloudflare. Prefer it over raw `wrangler`; when a command is not wrapped yet, fall back to `wrangler` (or the REST API where wrangler has no surface) and report the gap as a GitHub issue on simkimsia/cloudflare-axi."
+description: "Operate Cloudflare through the cloudflare-axi CLI - Workers deployments, deploys and secrets, Pages projects, KV namespaces, Email Routing, and account identity. Use whenever a task touches Cloudflare. Prefer it over raw `wrangler`; when a command is not wrapped yet, fall back to `wrangler` (or the REST API where wrangler has no surface) and report the gap as a GitHub issue on simkimsia/cloudflare-axi."
 user-invocable: false
 author: KimSia Sim (simkimsia)
 metadata:
@@ -34,7 +34,7 @@ copies go stale. Get the current source of truth from the CLI:
 - `cloudflare-axi --help` for global flags and the command index
 - `cloudflare-axi <command> --help` for per-command usage
 
-Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (list namespaces; `kv create <title>`, `kv keys <namespace>` (stops at `--limit`, default 50, and says when more exist), `kv get <key> --namespace <title|id>` or `--binding <NAME>` (`--key <name>` in place of the positional for a key starting with `-`; put, delete and `get --binding` refuse such keys), `kv put <key> --namespace <title|id> --file <path>|--stdin`, `kv delete <key> --namespace <title|id>`; always the remote store), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
+Today's surface: `deployments` (recent deployments of the Worker configured in cwd), `workers` (`workers deploy [--dry-run] --name <worker>`, `workers secret list`, `workers secret put <KEY> --name <worker>` with the value on stdin), `pages` (list projects; `pages create <name>`, `pages deploy <dir> --project <name>`, `pages deployments <name>`), `kv` (list namespaces; `kv create <title>`, `kv keys <namespace>` (stops at `--limit`, default 50, and says when more exist), `kv get <key> --namespace <title|id>` or `--binding <NAME>` (`--key <name>` in place of the positional for a key starting with `-`; put, delete and `get --binding` refuse such keys), `kv put <key> --namespace <title|id> --file <path>|--stdin`, `kv delete <key> --namespace <title|id>`; always the remote store), `whoami`, and `email` (Email Routing status / `dns` / `addresses` / `rules` for a `--zone`, plus `enable`, `add-destination <email>`, `forward <local-part|*> <destination>`, and `unforward <local-part|*>`, via the REST API since wrangler has no Email Routing commands; all writes are idempotent and `forward` refuses an unverified destination with code `UNVERIFIED`).
 
 ## When cloudflare-axi cannot do it
 
@@ -87,10 +87,14 @@ Today's surface: `deployments` (recent deployments of the Worker configured in c
 
 ## Writes
 
-Write commands: `pages create`, `pages deploy`, `kv create`, `kv put` and `kv delete`, plus the `email` writes above. `kv put` and `kv delete` need `--namespace <title|id>` named in full (`--binding` is refused for writes); `kv put` takes the value from `--file` or `--stdin`, never argv, and says whether it created or overwrote the key; `kv delete` refuses a key that does not exist. `pages deploy` defaults to `--branch main`, which is a production deploy; pass another `--branch` for a preview. It refuses a missing or empty directory before calling wrangler.
+Write commands: `pages create`, `pages deploy`, `workers deploy`, `workers secret put`, `kv create`, `kv put` and `kv delete`, plus the `email` writes above. `kv put` and `kv delete` need `--namespace <title|id>` named in full (`--binding` is refused for writes); `kv put` takes the value from `--file` or `--stdin`, never argv, and says whether it created or overwrote the key; `kv delete` refuses a key that does not exist. `pages deploy` defaults to `--branch main`, which is a production deploy; pass another `--branch` for a preview. It refuses a missing or empty directory before calling wrangler.
+
+`workers deploy` deploys the wrangler config in cwd (or `--config`). A real deploy requires `--name <worker>`; it runs a `--dry-run` first and refuses when `--name` differs from the Worker the config deploys. Use `workers deploy --dry-run` for a local bundle check. `workers secret put <KEY> --name <worker>` reads the value from stdin only (`printf %s "$VALUE" | ...`), never prints it, and refuses a Worker that does not exist (wrangler would silently create one).
 
 ## Deliberately not wrapped (do not file)
 
-Other mutating commands: `wrangler deploy`, `wrangler delete`, `wrangler pages project delete`, `wrangler secret put`, `wrangler d1 execute` with writes.
+Other mutating commands: `wrangler delete`, `wrangler pages project delete`, `wrangler d1 execute` with writes.
 These are excluded by design in v0. Use `wrangler` directly, tell the user
 you did so, and do not open an issue for them.
+
+Not wrapped yet, but these CAN be filed as gaps: `wrangler tail`, `wrangler secret delete`, `wrangler secret bulk`, and `wrangler deploy --env <name>`.
