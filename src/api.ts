@@ -18,6 +18,13 @@ interface ApiEnvelope<T> {
   success: boolean;
   errors?: ApiErrorEntry[];
   result: T;
+  result_info?: ApiResultInfo;
+}
+
+/** Paging info some list endpoints return beside `result` (KV keys: `cursor`, "" on the last page). */
+export interface ApiResultInfo {
+  count?: number;
+  cursor?: string;
 }
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -32,6 +39,35 @@ export async function cfRequest<T = unknown>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  return (await cfEnvelope<T>(method, path, body)).result;
+}
+
+/** GET returning `result` plus `result_info`, for cursor-paged list endpoints. */
+export async function cfGetPage<T = unknown>(
+  path: string,
+): Promise<{ result: T; info: ApiResultInfo }> {
+  const envelope = await cfEnvelope<T>("GET", path);
+  return { result: envelope.result, info: envelope.result_info ?? {} };
+}
+
+/**
+ * GET a raw-body endpoint (e.g. a KV value), which answers with the bytes
+ * themselves rather than the JSON envelope. Failures still come back as an
+ * envelope and map through mapApiError like every other call.
+ */
+export async function cfGetBytes(path: string): Promise<Buffer> {
+  const response = await send("GET", path);
+  if (response.ok) return Buffer.from(await response.arrayBuffer());
+  const text = await response.text();
+  const envelope = parseEnvelope<unknown>(text);
+  throw mapApiError(response.status, envelope?.errors ?? [], path);
+}
+
+async function send(
+  method: ApiMethod,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
   const { token } = await resolveApiCredentials();
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
@@ -39,9 +75,8 @@ export async function cfRequest<T = unknown>(
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   debugApi(method, path);
-  let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    return await fetch(`${API_BASE}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -54,15 +89,28 @@ export async function cfRequest<T = unknown>(
       ["Check network access to api.cloudflare.com, then retry"],
     );
   }
+}
 
-  const text = await response.text();
-  let envelope: ApiEnvelope<T> | undefined;
+function parseEnvelope<T>(text: string): ApiEnvelope<T> | undefined {
   try {
-    envelope = JSON.parse(text) as ApiEnvelope<T>;
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as ApiEnvelope<T>)
+      : undefined;
   } catch {
-    envelope = undefined;
+    return undefined;
   }
-  if (!envelope || typeof envelope !== "object") {
+}
+
+async function cfEnvelope<T>(
+  method: ApiMethod,
+  path: string,
+  body?: unknown,
+): Promise<ApiEnvelope<T>> {
+  const response = await send(method, path, body);
+  const text = await response.text();
+  const envelope = parseEnvelope<T>(text);
+  if (!envelope) {
     throw new AxiError(
       `Unexpected Cloudflare API response (HTTP ${response.status}): ${text.slice(0, 200)}`,
       "UNKNOWN",
@@ -72,5 +120,5 @@ export async function cfRequest<T = unknown>(
   if (!response.ok || envelope.success === false) {
     throw mapApiError(response.status, envelope.errors ?? [], path);
   }
-  return envelope.result;
+  return envelope;
 }

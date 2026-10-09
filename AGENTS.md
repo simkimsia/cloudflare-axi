@@ -18,7 +18,8 @@ the upstream `kunchenguid/axi` repo).
   `src/version.ts` must stay a LEAF module (node builtins only) or the fast
   path silently stops being fast.
 - `src/wrangler.ts` — sole place that spawns the `wrangler` binary
-  (`wranglerJson` / `wranglerExec`). Non-zero exits route through
+  (`wranglerJson` / `wranglerExec`; `wranglerBytes` for undecoded stdout with
+  a 32 MiB buffer and a distinct `WranglerOutputTooLargeError`). Non-zero exits route through
   `mapWranglerError`; a missing binary maps to `WRANGLER_NOT_INSTALLED`.
   `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner.
 - `src/debug.ts` — `AXI_DEBUG=1` prints each wrangler argv (from `run` in
@@ -30,9 +31,12 @@ the upstream `kunchenguid/axi` repo).
   gh-axi's `mapGhError`). Verify new patterns against real wrangler stderr
   before adding them.
 - `src/api.ts` — sole place that calls the Cloudflare REST API directly
-  (`cfGet`), only for surfaces wrangler has no subcommand for (VISION.md:
-  wrangler first). API failures map through `mapApiError` in `src/errors.ts`
-  (numeric codes, not stderr text) into the same AxiError codes.
+  (`cfGet`/`cfRequest`; `cfGetPage` adds `result_info` for cursor paging;
+  `cfGetBytes` reads raw-body endpoints such as KV values), only for surfaces
+  wrangler has no subcommand for (VISION.md: wrangler first). API failures
+  map through `mapApiError` in `src/errors.ts` (numeric codes, not stderr
+  text) into the same AxiError codes, as a `CloudflareApiError` that keeps
+  `apiCodes` for callers that branch on them.
 - `src/credentials.ts` — token for REST calls: `CLOUDFLARE_API_TOKEN`, else
   the OAuth token from wrangler's `config/default.toml` (candidate paths in
   `wranglerConfigCandidates`; legacy `~/.wrangler` wins, macOS otherwise
@@ -70,13 +74,23 @@ the upstream `kunchenguid/axi` repo).
   trailing newline; a missing key AND a missing namespace both give
   "Failed to fetch .../values/<key> - 404: Not Found", which is why `kv`
   resolves `--namespace <title|id>` against `kv namespace list` first. An
-  unknown `--namespace-id` on `key list` gives "[code: 10013]". `key delete`
-  succeeds on a missing key, so `kv put`/`kv delete` check existence with
-  `key list --prefix <key>` and an exact name match (never downloading the
-  value). `kv get` reads through `wranglerExec`, whose 10 MB maxBuffer caps
-  readable values below KV's 25 MiB limit.
+  unknown `--namespace-id` on `key list` gives "[code: 10013]".
+  `key list` pages through EVERY matching key and has no limit flag, and
+  there is no metadata-only existence check, so for a `--namespace` target
+  `kv keys`, `kv get` and the put/delete existence probe use REST (see the
+  KV REST notes below); `--binding` can only be resolved by wrangler, so
+  `kv keys --binding` and `kv get --binding` stay on it (`wranglerBytes`,
+  32 MiB; an overflowing binding listing suggests `--namespace`). Writes
+  stay on wrangler; `key delete` succeeds on a missing key, hence the probe.
   `--binding` resolves through the wrangler config in cwd; writes refuse it
-  (VISION.md Safety: the target is named, not inferred).
+  (VISION.md Safety: the target is named, not inferred). Through a binding,
+  a values 404 also means the binding's namespace was deleted, so that
+  NOT_FOUND names both causes.
+- wrangler's yargs reads a key starting with `-` as a flag and has no
+  escape: `key get -- -k`, `key get --key=-k` and bare `-k` all fail with
+  "Not enough non-option arguments" (4.127.1, verified live read-only). So
+  `--key <name>` exists for such keys, `kv get --namespace` reads them over
+  REST, and put, delete and `get --binding` refuse them (VALIDATION_ERROR).
 - `wrangler kv namespace create <title>` is text-only and prints a
   `[[kv_namespaces]]` snippet with the new id (TOML or JSON by the cwd config
   format). With a wrangler.jsonc in cwd it may offer to patch the config, so
@@ -153,6 +167,16 @@ real on a throwaway project and delete it afterwards:
   cannot see), 6003/6111 bad Authorization header (HTTP 400), 9109 Invalid
   zone identifier, 2054 Destination address is not verified (write side,
   mapped to `UNVERIFIED`).
+- Workers KV (verified live 2026-10-09, read-only; account from
+  `resolveAccountId`, since wrangler's namespace list has no account id):
+  `GET /accounts/{a}/storage/kv/namespaces/{ns}/keys?prefix=&limit=&cursor=`
+  (`limit` must be 10..1000, else 400 code 10028; `result_info.cursor` is ""
+  on the last page), `.../metadata/{key}` (200 with `result: null` for a key
+  without metadata, so 200 means it exists), `.../values/{key}` (raw bytes,
+  `application/octet-stream`, not the JSON envelope; errors still are). Keys
+  are URL-encoded in the path. A missing key is 404 code 10009 ("get: 'key
+  not found'" / "metadata: 'key not found'"), a missing namespace 404 code
+  10013; a bad token 401 code 10000 (AUTH).
 - `email dns` also resolves live DNS via `node:dns` to report `ok` /
   `missing` / `differs` per record; tests inject a fake resolver.
 

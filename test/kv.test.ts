@@ -6,9 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AxiError, mapWranglerError } from "../src/errors.js";
 
 // Drives `kv` subcommands end-to-end through src/wrangler.ts with
-// child_process.execFile mocked, asserting the wrangler argv forwarded and the
-// rendered output. Fixtures are real wrangler 4.127.1 output captured live
-// 2026-10-09 (read-only commands) or taken from the wrangler source (create).
+// child_process.execFile mocked and through src/api.ts with fetch stubbed,
+// asserting the wrangler argv and REST paths used and the rendered output.
+// Fixtures are real wrangler 4.127.1 output and api.cloudflare.com envelopes
+// captured live 2026-10-09 (read-only calls) or taken from the wrangler
+// source (create).
 
 const { execFile } = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile }));
@@ -35,7 +37,7 @@ const KEY_404 = `\n${ERR(
 )}\n\n\nIf you think this is a bug then please create an issue`;
 
 interface Reply {
-  stdout?: string;
+  stdout?: string | Buffer;
   stderr?: string;
   code?: number;
 }
@@ -45,16 +47,109 @@ let replies: Record<string, Reply>;
 let calls: string[][];
 let putValues: string[];
 
+// ---- REST stub: the SETTINGS namespace in account "acc" ----
+const NS_PATH = `/accounts/acc/storage/kv/namespaces/${SETTINGS_ID}`;
+/** Keys the stubbed `GET .../keys` pages through, in name order. */
+let apiKeys: { name: string; expiration?: number }[];
+/** Values (and so existence) served by `.../values/{key}` and `.../metadata/{key}`. */
+let apiValues: Record<string, Buffer>;
+/** Every REST path requested, in order. */
+let apiCalls: string[];
+/** Keys handed out by the keys endpoint, summed over pages. */
+let keysServed: number;
+
+const envelope = (status: number, body: object) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+// Real envelopes, captured live 2026-10-09.
+const KEY_NOT_FOUND = (op: string) =>
+  envelope(404, {
+    result: null,
+    errors: [{ code: 10009, message: `${op}: 'key not found'` }],
+    messages: [],
+    success: false,
+  });
+const NAMESPACE_NOT_FOUND = envelope(404, {
+  result: null,
+  errors: [{ code: 10013, message: "get namespace: 'namespace not found'" }],
+  messages: [],
+  success: false,
+});
+
+function apiReply(path: string): Response {
+  const url = new URL(`https://x${path}`);
+  if (!url.pathname.startsWith(NS_PATH)) return NAMESPACE_NOT_FOUND;
+  const rest = url.pathname.slice(NS_PATH.length);
+  if (rest === "/keys") {
+    const limit = Number(url.searchParams.get("limit") ?? 1000);
+    if (limit < 10 || limit > 1000) {
+      return envelope(400, {
+        result: null,
+        errors: [
+          { code: 10028, message: "limit argument must be at least 10" },
+        ],
+        success: false,
+      });
+    }
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const from = Number(url.searchParams.get("cursor") || 0);
+    const matching = apiKeys.filter((k) => k.name.startsWith(prefix));
+    const page = matching.slice(from, from + limit);
+    keysServed += page.length;
+    const next = from + limit < matching.length ? String(from + limit) : "";
+    return envelope(200, {
+      result: page,
+      errors: [],
+      messages: [],
+      success: true,
+      result_info: { count: page.length, cursor: next },
+    });
+  }
+  const [, kind, encoded] = /^\/(values|metadata)\/(.+)$/.exec(rest) ?? [];
+  const key = encoded === undefined ? undefined : decodeURIComponent(encoded);
+  if (key === undefined || !(key in apiValues)) {
+    return KEY_NOT_FOUND(kind === "metadata" ? "metadata" : "get");
+  }
+  if (kind === "metadata") {
+    return envelope(200, {
+      result: null,
+      errors: [],
+      messages: [],
+      success: true,
+    });
+  }
+  return new Response(new Uint8Array(apiValues[key]), {
+    status: 200,
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+}
+
 beforeEach(() => {
   calls = [];
   putValues = [];
+  apiKeys = [];
+  apiValues = {};
+  apiCalls = [];
+  keysServed = 0;
+  vi.stubEnv("CLOUDFLARE_API_TOKEN", "test-token");
+  vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acc");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = url.replace("https://api.cloudflare.com/client/v4", "");
+      apiCalls.push(path);
+      return apiReply(path);
+    }),
+  );
   replies = { "kv namespace list": { stdout: JSON.stringify(NAMESPACES) } };
   execFile.mockImplementation(
     (
       _file: string,
       args: string[],
       _opts: unknown,
-      cb: (e: unknown, out: string, err: string) => void,
+      cb: (e: unknown, out: string | Buffer, err: string) => void,
     ) => {
       calls.push(args);
       if (args[2] === "put") {
@@ -76,6 +171,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 async function expectError(
@@ -159,51 +256,95 @@ describe("kv create", () => {
 
 describe("kv keys", () => {
   beforeEach(() => {
-    replies["kv key list"] = {
-      stdout: JSON.stringify([
-        { name: "feed" },
-        { name: "limit:35317871", expiration: 1791590400 },
-        { name: "member:1" },
-      ]),
-    };
+    apiKeys = [
+      { name: "feed" },
+      { name: "limit:35317871", expiration: 1791590400 },
+      { name: "member:1" },
+    ];
+    replies["kv key list"] = { stdout: JSON.stringify(apiKeys) };
   });
 
-  it("resolves a namespace title to its id and always lists remote", async () => {
+  it("lists a namespace over REST, with the prefix and a bounded page", async () => {
     const out = await kvCommand(["keys", "SETTINGS", "--prefix", "li"]);
-    expect(calls[1]).toEqual([
-      "kv",
-      "key",
-      "list",
-      "--namespace-id",
-      SETTINGS_ID,
-      "--remote",
-      "--prefix",
-      "li",
-    ]);
+    expect(calls).toEqual([["kv", "namespace", "list"]]);
+    expect(apiCalls).toEqual([`${NS_PATH}/keys?limit=50&prefix=li`]);
     expect(out).toContain(
-      `count: 3 of 3 keys in SETTINGS (${SETTINGS_ID}) with prefix li`,
+      `count: 1 keys in SETTINGS (${SETTINGS_ID}) with prefix li`,
     );
-    expect(out).toContain("feed,never");
+    expect(out).not.toContain("more exist");
     expect(out).toContain('"limit:35317871","2026-10-10T00:00:00.000Z"');
   });
 
-  it("passes --binding through without a namespace lookup", async () => {
-    await kvCommand(["keys", "--binding", "SETTINGS"]);
-    expect(calls).toEqual([
-      ["kv", "key", "list", "--binding", "SETTINGS", "--remote"],
-    ]);
+  it("never fetches a large listing beyond --limit", async () => {
+    apiKeys = Array.from({ length: 5000 }, (_, i) => ({
+      name: `k:${String(i).padStart(5, "0")}`,
+    }));
+    const out = await kvCommand(["keys", "SETTINGS", "--limit", "3"]);
+    // The API's page size floor is 10: one page, cut to 3 rows.
+    expect(apiCalls).toEqual([`${NS_PATH}/keys?limit=10`]);
+    expect(keysServed).toBe(10);
+    expect(out).toContain(
+      `count: 3 keys in SETTINGS (${SETTINGS_ID}), more exist`,
+    );
+    expect(out).toContain("k:00002");
+    expect(out).not.toContain("k:00003");
+    expect(out).toContain("pass a larger --limit (e.g. --limit 6)");
   });
 
-  it("caps rows at --limit with a hint", async () => {
+  it("pages with the cursor until --limit rows, then stops", async () => {
+    apiKeys = Array.from({ length: 5000 }, (_, i) => ({
+      name: `k:${String(i).padStart(5, "0")}`,
+    }));
+    const out = await kvCommand(["keys", SETTINGS_ID, "--limit", "1500"]);
+    expect(apiCalls).toEqual([
+      `${NS_PATH}/keys?limit=1000`,
+      `${NS_PATH}/keys?limit=500&cursor=1000`,
+    ]);
+    expect(keysServed).toBe(1500);
+    expect(out).toContain("count: 1500 keys in SETTINGS");
+    expect(out).toContain("more exist");
+  });
+
+  it("says nothing more exists when the last page ends at --limit", async () => {
+    apiKeys = Array.from({ length: 10 }, (_, i) => ({ name: `k:${i}` }));
+    const out = await kvCommand(["keys", "SETTINGS", "--limit", "10"]);
+    expect(out).toContain("count: 10 keys in SETTINGS");
+    expect(out).not.toContain("more exist");
+  });
+
+  it("passes --binding to wrangler without a namespace lookup", async () => {
     const out = await kvCommand([
       "keys",
-      "--namespace",
-      SETTINGS_ID,
+      "--binding",
+      "SETTINGS",
       "--limit",
       "1",
     ]);
-    expect(out).toContain("count: 1 of 3 keys");
-    expect(out).toContain("Pass --limit 3 for all");
+    expect(calls).toEqual([
+      ["kv", "key", "list", "--binding", "SETTINGS", "--remote"],
+    ]);
+    expect(apiCalls).toEqual([]);
+    expect(out).toContain("count: 1 keys in binding SETTINGS");
+    expect(out).toContain("more exist");
+  });
+
+  it("suggests --namespace when a --binding listing overflows wrangler's buffer", async () => {
+    execFile.mockImplementationOnce(
+      (_f: string, _a: string[], _o: unknown, cb: (e: unknown) => void) => {
+        cb(
+          Object.assign(new Error("stdout maxBuffer length exceeded"), {
+            code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+          }),
+        );
+        return {};
+      },
+    );
+    const error = await expectError(
+      kvCommand(["keys", "--binding", "SETTINGS"]),
+      "UNKNOWN",
+      /exceeded 32 MiB/,
+    );
+    expect(error.suggestions[0]).toContain("Pass --namespace <title|id>");
   });
 
   it("reports an unknown namespace as NOT_FOUND before listing", async () => {
@@ -213,6 +354,31 @@ describe("kv keys", () => {
       /settings not found/,
     );
     expect(calls).toHaveLength(1);
+    expect(apiCalls).toEqual([]);
+  });
+
+  it("maps a namespace deleted after resolving (code 10013) to NOT_FOUND", async () => {
+    replies["kv namespace list"] = {
+      stdout: JSON.stringify([{ id: "f".repeat(32), title: "GONE" }]),
+    };
+    const error = await expectError(kvCommand(["keys", "GONE"]), "NOT_FOUND");
+    expect(error.message).toContain("[code: 10013]");
+    expect(error.suggestions[0]).toContain("cloudflare-axi kv");
+  });
+
+  it("maps a token without KV access (code 10000) to AUTH", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        envelope(403, {
+          result: null,
+          success: false,
+          errors: [{ code: 10000, message: "Authentication error" }],
+          messages: [],
+        }),
+      ),
+    );
+    await expectError(kvCommand(["keys", "SETTINGS"]), "AUTH", /10000/);
   });
 
   it("rejects both a namespace and a binding", async () => {
@@ -235,18 +401,11 @@ describe("kv keys", () => {
 });
 
 describe("kv get", () => {
-  it("pretty-prints a JSON value with its size", async () => {
-    replies["kv key get feed"] = { stdout: FEED };
+  it("reads a namespace value over REST and pretty-prints JSON with its exact size", async () => {
+    apiValues.feed = Buffer.from(FEED);
     const out = await kvCommand(["get", "feed", "--namespace", "SETTINGS"]);
-    expect(calls[1]).toEqual([
-      "kv",
-      "key",
-      "get",
-      "feed",
-      "--namespace-id",
-      SETTINGS_ID,
-      "--remote",
-    ]);
+    expect(calls).toEqual([["kv", "namespace", "list"]]);
+    expect(apiCalls).toEqual([`${NS_PATH}/values/feed`]);
     expect(out).toContain(`size: ${FEED.length} bytes`);
     expect(out).toContain("format: json");
     expect(out).toContain(
@@ -254,16 +413,42 @@ describe("kv get", () => {
     );
   });
 
-  it("prints plain text as-is", async () => {
-    replies["kv key get home:1"] = { stdout: "east" };
+  it("reads a --binding value through wrangler", async () => {
+    replies["kv key get home:1"] = { stdout: Buffer.from("east") };
     const out = await kvCommand(["get", "home:1", "--binding", "SETTINGS"]);
+    expect(calls).toEqual([
+      ["kv", "key", "get", "home:1", "--binding", "SETTINGS", "--remote"],
+    ]);
     expect(out).toContain("format: text");
     expect(out).toContain("value:\n  east");
   });
 
+  it("shows text containing a literal U+FFFD, but not invalid UTF-8", async () => {
+    apiValues.note = Buffer.from("bad byte shown as \uFFFD here");
+    const text = await kvCommand(["get", "note", "--namespace", "SETTINGS"]);
+    expect(text).toContain("format: text");
+    expect(text).toContain("bad byte shown as \uFFFD here");
+    expect(text).toContain("size: 26 bytes");
+
+    apiValues.raw = Buffer.from([0x68, 0x69, 0xff, 0xfe]);
+    const binary = await kvCommand(["get", "raw", "--namespace", "SETTINGS"]);
+    expect(binary).toContain("format: binary");
+    expect(binary).toContain("size: 4 bytes");
+    expect(binary).toContain("value: not shown");
+  });
+
+  it("classifies --binding values from wrangler's raw bytes", async () => {
+    replies["kv key get img"] = {
+      stdout: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    };
+    const out = await kvCommand(["get", "img", "--binding", "SETTINGS"]);
+    expect(out).toContain("format: binary");
+    expect(out).toContain("size: 8 bytes");
+  });
+
   it("truncates a large value unless --full", async () => {
     const big = Array.from({ length: 2000 }, (_, i) => `line ${i}`).join("\n");
-    replies["kv key get big"] = { stdout: big };
+    apiValues.big = Buffer.from(big);
     const out = await kvCommand(["get", "big", "--namespace", "SETTINGS"]);
     // 4000 chars of value plus two spaces of indent per line.
     expect(out.length).toBeLessThan(5500);
@@ -280,22 +465,77 @@ describe("kv get", () => {
     expect(full).not.toContain("Truncated");
   });
 
-  it("does not print a binary value", async () => {
-    replies["kv key get img"] = {
-      stdout: "\u0089PNG\r\n\u001a\n\u0000\u0000�",
-    };
-    const out = await kvCommand(["get", "img", "--namespace", "SETTINGS"]);
-    expect(out).toContain("format: binary");
-    expect(out).toContain("value: not shown");
-  });
-
-  it("maps a missing key to NOT_FOUND", async () => {
-    replies["kv key get missing"] = { code: 1, stderr: KEY_404 };
-    await expectError(
+  it("maps a missing key in a namespace (code 10009) to a key-specific NOT_FOUND", async () => {
+    const error = await expectError(
       kvCommand(["get", "missing", "--namespace", "SETTINGS"]),
       "NOT_FOUND",
-      /KV key not found/,
+      /KV key missing not found in namespace SETTINGS/,
     );
+    expect(error.message).not.toContain("binding");
+  });
+
+  it("names both causes when a --binding read 404s", async () => {
+    replies["kv key get missing"] = { code: 1, stderr: KEY_404 };
+    const error = await expectError(
+      kvCommand(["get", "missing", "--binding", "SETTINGS"]),
+      "NOT_FOUND",
+      /the key is missing, or the binding's namespace id no longer exists/,
+    );
+    expect(error.suggestions[0]).toContain("cloudflare-axi kv");
+    expect(error.suggestions[0]).toContain("kv_namespaces entry for SETTINGS");
+  });
+
+  it("reads a dash-prefixed key with --key, URL-encoded over REST", async () => {
+    apiValues["-feed"] = Buffer.from("dash");
+    const out = await kvCommand([
+      "get",
+      "--key",
+      "-feed",
+      "--namespace",
+      "SETTINGS",
+    ]);
+    expect(apiCalls).toEqual([`${NS_PATH}/values/-feed`]);
+    expect(out).toContain('key: "-feed"');
+    expect(out).toContain("value:\n  dash");
+    const eq = await kvCommand([
+      "get",
+      "--key=-feed",
+      "--namespace",
+      "SETTINGS",
+    ]);
+    expect(eq).toContain("value:\n  dash");
+    apiValues["a/b c"] = Buffer.from("slash");
+    await kvCommand(["get", "--key", "a/b c", "--namespace", "SETTINGS"]);
+    expect(apiCalls.at(-1)).toBe(`${NS_PATH}/values/a%2Fb%20c`);
+  });
+
+  it("refuses a dash-prefixed key through --binding before calling wrangler", async () => {
+    const error = await expectError(
+      kvCommand(["get", "--key", "-feed", "--binding", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /wrangler reads a key starting with - as a flag/,
+    );
+    expect(error.suggestions[0]).toContain("--namespace");
+    expect(calls).toEqual([]);
+  });
+
+  it("takes the key exactly once and never a flag as --key's value", async () => {
+    await expectError(
+      kvCommand(["get", "feed", "--key", "x", "--namespace", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /pass the key once/,
+    );
+    await expectError(
+      kvCommand(["get", "--key", "--namespace", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /--key requires a value/,
+    );
+    await expectError(
+      kvCommand(["get", "--namespace", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /--key <name> for a key starting with -/,
+    );
+    expect(calls).toEqual([]);
   });
 
   it("requires a namespace or binding", async () => {
@@ -316,9 +556,8 @@ describe("kv put", () => {
   it("writes a file value and reports a new key as created", async () => {
     const file = join(dir, "v.json");
     writeFileSync(file, '{"on":true}');
-    replies["kv key list"] = {
-      stdout: JSON.stringify([{ name: "flags:old" }]),
-    };
+    apiKeys = [{ name: "flags:old" }];
+    apiValues["flags:old"] = Buffer.from("x");
     const out = await kvCommand([
       "put",
       "flags",
@@ -329,6 +568,7 @@ describe("kv put", () => {
       "--ttl",
       "3600",
     ]);
+    expect(apiCalls).toEqual([`${NS_PATH}/metadata/flags`]);
     expect(calls.at(-1)).toEqual([
       "kv",
       "key",
@@ -347,10 +587,10 @@ describe("kv put", () => {
     expect(out).toContain("ttl: 3600s");
   });
 
-  it("reports an overwrite, probing by exact name without reading the value", async () => {
+  it("reports an overwrite from the metadata probe, never listing or reading values", async () => {
     const file = join(dir, "v");
     writeFileSync(file, "new");
-    replies["kv key list"] = { stdout: JSON.stringify([{ name: "feed" }]) };
+    apiValues.feed = Buffer.from("old");
     const out = await kvCommand([
       "put",
       "feed",
@@ -359,17 +599,11 @@ describe("kv put", () => {
       "--file",
       file,
     ]);
-    expect(calls[1]).toEqual([
-      "kv",
-      "key",
-      "list",
-      "--namespace-id",
-      SETTINGS_ID,
-      "--remote",
-      "--prefix",
-      "feed",
+    expect(apiCalls).toEqual([`${NS_PATH}/metadata/feed`]);
+    expect(calls.map((c) => c.slice(0, 3).join(" "))).toEqual([
+      "kv namespace list",
+      "kv key put",
     ]);
-    expect(calls.some((c) => c[2] === "get")).toBe(false);
     expect(out).toContain("action: overwritten");
   });
 
@@ -380,7 +614,6 @@ describe("kv put", () => {
     vi.spyOn(process, "stdin", "get").mockReturnValue(
       stdin as unknown as typeof process.stdin,
     );
-    replies["kv key list"] = { stdout: "[]" };
     const out = await kvCommand([
       "put",
       "k",
@@ -392,6 +625,41 @@ describe("kv put", () => {
     const put = calls.at(-1)!;
     expect(put).not.toContain("from stdin");
     expect(out).toContain("size: 10 bytes");
+  });
+
+  it("refuses a dash-prefixed key before any call", async () => {
+    const file = join(dir, "v");
+    writeFileSync(file, "x");
+    await expectError(
+      kvCommand([
+        "put",
+        "--key",
+        "-feed",
+        "--namespace",
+        "SETTINGS",
+        "--file",
+        file,
+      ]),
+      "VALIDATION_ERROR",
+      /`kv put` cannot take key -feed/,
+    );
+    expect(calls).toEqual([]);
+    expect(apiCalls).toEqual([]);
+  });
+
+  it("accepts --key for an ordinary key", async () => {
+    const file = join(dir, "v");
+    writeFileSync(file, "x");
+    await kvCommand([
+      "put",
+      "--key",
+      "plain",
+      "--namespace",
+      "SETTINGS",
+      "--file",
+      file,
+    ]);
+    expect(calls.at(-1)?.slice(0, 4)).toEqual(["kv", "key", "put", "plain"]);
   });
 
   it("refuses --binding for a write", async () => {
@@ -450,10 +718,9 @@ describe("kv put", () => {
 
 describe("kv delete", () => {
   it("deletes an existing key and says what it removed", async () => {
-    replies["kv key list"] = {
-      stdout: JSON.stringify([{ name: "feed" }, { name: "feed:old" }]),
-    };
+    apiValues.feed = Buffer.from("v");
     const out = await kvCommand(["delete", "feed", "--namespace", "SETTINGS"]);
+    expect(apiCalls).toEqual([`${NS_PATH}/metadata/feed`]);
     expect(calls.at(-1)).toEqual([
       "kv",
       "key",
@@ -463,20 +730,27 @@ describe("kv delete", () => {
       SETTINGS_ID,
       "--remote",
     ]);
-    expect(calls.some((c) => c[2] === "get")).toBe(false);
+    expect(calls.some((c) => c[1] === "key" && c[2] !== "delete")).toBe(false);
     expect(out).toContain("action: deleted");
   });
 
   it("refuses a missing key without calling delete", async () => {
-    replies["kv key list"] = {
-      stdout: JSON.stringify([{ name: "missing:1" }]),
-    };
+    apiValues["missing:1"] = Buffer.from("v");
     await expectError(
       kvCommand(["delete", "missing", "--namespace", "SETTINGS"]),
       "NOT_FOUND",
       /nothing deleted/,
     );
     expect(calls.some((c) => c[2] === "delete")).toBe(false);
+  });
+
+  it("refuses a dash-prefixed key before any call", async () => {
+    await expectError(
+      kvCommand(["delete", "--key=-feed", "--namespace", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /`kv delete` cannot take key -feed/,
+    );
+    expect(calls).toEqual([]);
   });
 
   it("requires --namespace named in full", async () => {
@@ -500,19 +774,23 @@ describe("kv delete", () => {
 });
 
 describe("helpers", () => {
-  it("classifies values", () => {
-    expect(classifyValue("[1,2]").format).toBe("json");
-    expect(classifyValue("{not json").format).toBe("text");
-    expect(classifyValue("a\tb\r\n").format).toBe("text");
-    expect(classifyValue("\u0000").format).toBe("binary");
+  const b = (s: string) => Buffer.from(s);
+
+  it("classifies values from their bytes", () => {
+    expect(classifyValue(b("[1,2]")).format).toBe("json");
+    expect(classifyValue(b("{not json")).format).toBe("text");
+    expect(classifyValue(b("a\tb\r\n")).format).toBe("text");
+    expect(classifyValue(b("\u0000")).format).toBe("binary");
+    expect(classifyValue(b("\uFFFD")).format).toBe("text");
+    expect(classifyValue(Buffer.from([0xc3, 0x28])).format).toBe("binary");
   });
 
   it("shows JSON as stored text when parsing would change it", () => {
     const big = '{"id":12345678901234567890}';
-    expect(classifyValue(big)).toEqual({ format: "text", text: big });
+    expect(classifyValue(b(big))).toEqual({ format: "text", text: big });
     const dup = '{"a":1,"a":2}';
-    expect(classifyValue(dup)).toEqual({ format: "text", text: dup });
-    expect(classifyValue('{ "s": "a  b",\n "n": [1, 2] }')).toEqual({
+    expect(classifyValue(b(dup))).toEqual({ format: "text", text: dup });
+    expect(classifyValue(b('{ "s": "a  b",\n "n": [1, 2] }'))).toEqual({
       format: "json",
       text: '{\n  "s": "a  b",\n  "n": [\n    1,\n    2\n  ]\n}',
     });

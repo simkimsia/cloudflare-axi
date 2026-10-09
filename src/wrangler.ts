@@ -77,3 +77,54 @@ export async function wranglerExec(args: string[]): Promise<string> {
   }
   return result.stdout;
 }
+
+/** KV values go up to 25 MiB; leave headroom for wrangler's own output. */
+export const BYTES_MAX_BUFFER = 32 * 1024 * 1024; // 32 MiB
+
+/** wrangler printed more than the buffer allows; callers can suggest a bounded alternative. */
+export class WranglerOutputTooLargeError extends AxiError {
+  constructor(limit: number) {
+    super(
+      `wrangler output exceeded ${Math.round(limit / (1024 * 1024))} MiB`,
+      "UNKNOWN",
+      [UNKNOWN_SUGGESTION],
+    );
+  }
+}
+
+/**
+ * Execute wrangler and return raw stdout bytes, undecoded (a value may not be
+ * UTF-8). Separate from `run` on purpose: same error mapping, but a larger
+ * buffer and a distinct error when output overflows it.
+ */
+export function wranglerBytes(
+  args: string[],
+  maxBuffer = BYTES_MAX_BUFFER,
+): Promise<Buffer> {
+  debugWrangler(args);
+  return new Promise((resolve, reject) => {
+    execFile(
+      "wrangler",
+      args,
+      { encoding: "buffer", maxBuffer },
+      (error, stdout, stderr) => {
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+        if (code === "ENOENT") return reject(wranglerNotInstalledError());
+        if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+          return reject(new WranglerOutputTooLargeError(maxBuffer));
+        }
+        const toBuffer = (b: Buffer | string | undefined) =>
+          Buffer.isBuffer(b) ? b : Buffer.from(b ?? "");
+        if (error) {
+          const text =
+            toBuffer(stderr).toString("utf8") ||
+            toBuffer(stdout).toString("utf8");
+          return reject(
+            mapWranglerError(text, typeof code === "number" ? code : 1),
+          );
+        }
+        resolve(toBuffer(stdout));
+      },
+    );
+  });
+}

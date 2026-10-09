@@ -125,8 +125,9 @@ const patterns: ErrorPattern[] = [
     // Real stderr (`wrangler kv key get` for a missing key, captured
     // 2026-10-09): "Failed to fetch https://api.cloudflare.com/client/v4/
     // accounts/<a>/storage/kv/namespaces/<ns>/values/<key> - 404: Not Found".
-    // A missing namespace gives the same 404; `kv get` resolves the
-    // namespace first, so here it means the key.
+    // A missing namespace gives the same 404. Only `kv get --binding` reads
+    // through wrangler, and kv.ts rewrites its NOT_FOUND to name both causes
+    // (missing key, or a binding whose namespace was deleted).
     pattern: /\/storage\/kv\/namespaces\/[^/\s]+\/values\/\S* - 404/i,
     code: "NOT_FOUND",
     message: "KV key not found in this namespace",
@@ -237,11 +238,39 @@ export interface ApiErrorEntry {
 // format for Authorization header, 10001 Unable to authenticate request.
 const API_AUTH_CODES = new Set([10000, 6003, 6111, 10001]);
 // 7003 Could not route to <path>, 1001 resource not found, 9109 Invalid zone
-// identifier (a 32-hex id that matches no zone).
-const API_NOT_FOUND_CODES = new Set([7003, 1001, 9109]);
+// identifier (a 32-hex id that matches no zone). KV (seen live 2026-10-09,
+// all HTTP 404): 10009 "get: 'key not found'" / "metadata: 'key not found'",
+// 10013 "get namespace: 'namespace not found'".
+export const API_KV_KEY_NOT_FOUND = 10009;
+const API_KV_NAMESPACE_NOT_FOUND = 10013;
+const API_NOT_FOUND_CODES = new Set([
+  7003,
+  1001,
+  9109,
+  API_KV_KEY_NOT_FOUND,
+  API_KV_NAMESPACE_NOT_FOUND,
+]);
 // 2054 "Destination address is not verified" (seen live 2026-09-03 when
 // creating a forward rule before the destination clicked its link).
 const API_UNVERIFIED_CODES = new Set([2054]);
+
+/** An AxiError from a REST call, keeping the API's numeric codes for callers that branch on them. */
+export class CloudflareApiError extends AxiError {
+  readonly status: number;
+  readonly apiCodes: number[];
+
+  constructor(
+    message: string,
+    code: ErrorCode,
+    suggestions: string[],
+    status: number,
+    apiCodes: number[],
+  ) {
+    super(message, code, suggestions);
+    this.status = status;
+    this.apiCodes = apiCodes;
+  }
+}
 
 /**
  * Translate a Cloudflare REST API failure into the same AxiError codes the
@@ -252,7 +281,7 @@ export function mapApiError(
   status: number,
   errors: ApiErrorEntry[],
   path?: string,
-): AxiError {
+): CloudflareApiError {
   const first = errors[0];
   const detail = first
     ? `${first.message} [code: ${first.code}]`
@@ -269,32 +298,41 @@ export function mapApiError(
     codes.some((c) => API_AUTH_CODES.has(c)) ||
     (!isNotFound && (status === 401 || status === 403));
 
+  const make = (message: string, code: ErrorCode, suggestions: string[]) =>
+    new CloudflareApiError(message, code, suggestions, status, codes);
+
   if (codes.some((c) => API_UNVERIFIED_CODES.has(c))) {
-    return new AxiError(detail, "UNVERIFIED", [
+    return make(detail, "UNVERIFIED", [
       "Click the verification link Cloudflare emailed to the destination, then re-run",
       "Run `cloudflare-axi email addresses` to check which destinations are verified",
     ]);
   }
+  if (codes.includes(API_KV_NAMESPACE_NOT_FOUND)) {
+    return make(detail, "NOT_FOUND", [
+      "Run `cloudflare-axi kv` to list namespaces (title, id)",
+    ]);
+  }
+  if (codes.includes(API_KV_KEY_NOT_FOUND)) {
+    return make(detail, "NOT_FOUND", [
+      "Run `cloudflare-axi kv keys <namespace> --prefix <start of key>` to check the exact key name (case-sensitive)",
+    ]);
+  }
   if (isNotFound) {
-    return new AxiError(detail, "NOT_FOUND", [
+    return make(detail, "NOT_FOUND", [
       "Check the zone name / id and that this account owns it",
     ]);
   }
   if (isAuth) {
-    return new AxiError(
-      `Cloudflare API rejected the credentials: ${detail}`,
-      "AUTH",
-      [
-        "Run `wrangler whoami` to see the active token's scopes; re-run `wrangler login` to widen them",
-        "Or set CLOUDFLARE_API_TOKEN to a token scoped for this resource",
-        "A zone or account id these credentials cannot see reports as an authentication error too",
-      ],
-    );
+    return make(`Cloudflare API rejected the credentials: ${detail}`, "AUTH", [
+      "Run `wrangler whoami` to see the active token's scopes; re-run `wrangler login` to widen them",
+      "Or set CLOUDFLARE_API_TOKEN to a token scoped for this resource",
+      "A zone or account id these credentials cannot see reports as an authentication error too",
+    ]);
   }
   if (status === 429) {
-    return new AxiError(`Cloudflare API rate limited: ${detail}`, "UNKNOWN", [
+    return make(`Cloudflare API rate limited: ${detail}`, "UNKNOWN", [
       "Wait a moment and retry",
     ]);
   }
-  return new AxiError(detail, "UNKNOWN", [REPORT_SUGGESTION]);
+  return make(detail, "UNKNOWN", [REPORT_SUGGESTION]);
 }

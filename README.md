@@ -59,8 +59,9 @@ cloudflare-axi pages deploy <dir> --project <name> [--branch main]   # default b
 cloudflare-axi pages deployments <name> [--environment production|preview]
 cloudflare-axi kv           # all Workers KV namespaces in your account
 cloudflare-axi kv create SETTINGS                       # new namespace; prints the binding to add to wrangler.toml
-cloudflare-axi kv keys SETTINGS [--prefix user:]        # keys in a namespace (title or id; or --binding NAME)
+cloudflare-axi kv keys SETTINGS [--prefix user:] [--limit 50]   # keys in a namespace (title or id; or --binding NAME); fetches only --limit keys
 cloudflare-axi kv get feed --namespace SETTINGS         # value (JSON pretty-printed), truncated unless --full
+cloudflare-axi kv get --key -feed --namespace SETTINGS  # --key for a key starting with - (put/delete refuse such keys)
 cloudflare-axi kv put feed --namespace SETTINGS --file ./feed.json [--ttl 3600]   # or pipe it in with --stdin
 cloudflare-axi kv delete feed --namespace SETTINGS      # refuses a key that does not exist
 cloudflare-axi whoami       # logged-in Cloudflare account

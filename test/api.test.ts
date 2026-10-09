@@ -35,6 +35,19 @@ describe("mapApiError", () => {
     ).toBe("NOT_FOUND");
   });
 
+  it("maps KV codes 10009 (key) and 10013 (namespace) to NOT_FOUND, keeping the codes", () => {
+    const key = mapApiError(404, [
+      { code: 10009, message: "get: 'key not found'" },
+    ]);
+    expect(key.code).toBe("NOT_FOUND");
+    expect(key.apiCodes).toEqual([10009]);
+    const ns = mapApiError(404, [
+      { code: 10013, message: "get namespace: 'namespace not found'" },
+    ]);
+    expect(ns.code).toBe("NOT_FOUND");
+    expect(ns.suggestions[0]).toContain("cloudflare-axi kv");
+  });
+
   it("maps code 2054 (unverified destination) to UNVERIFIED with a next step", () => {
     const err = mapApiError(400, [
       { code: 2054, message: "Destination address is not verified" },
