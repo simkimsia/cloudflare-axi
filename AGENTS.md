@@ -125,9 +125,16 @@ the upstream `kunchenguid/axi` repo).
 - `wrangler kv namespace create <title>` is text-only and prints a
   `[[kv_namespaces]]` snippet with the new id (TOML or JSON by the cwd config
   format). With a wrangler.jsonc in cwd it may offer to patch the config, so
-  `kv create` passes `--update-config=false`. Not run live by this repo's
-  checks (output taken from the wrangler 4.127.1 source); a taken title →
+  `kv create` passes `--update-config=false`. A taken title →
   'A KV namespace with the title "x" already exists.' → `ALREADY_EXISTS`.
+  Verified live 2026-10-12 (#45, wrangler 4.127.1): `kv create` parsed the
+  id and showed the toml and jsonc snippets, and a rerun gave
+  `ALREADY_EXISTS`. `kv put --stdin` created then overwrote; `--file` with
+  `--ttl 60` created with the TTL (`--ttl 30` and a missing file gave
+  `VALIDATION_ERROR`); `kv delete` deleted and a rerun gave `NOT_FOUND`.
+  `kv get` / `kv keys --binding` worked from a project dir, an unknown
+  binding gave `NOT_LINKED` and `kv put --binding` was refused. There is no
+  axi command to delete a namespace yet (#46).
 - `wrangler pages deployment list --project-name <n> --json` has the same
   display-key quirk, and its `Status` field is a pre-rendered relative time
   ("1 day ago"), not a status. Newest first. Missing project → "Project not
@@ -194,10 +201,18 @@ the upstream `kunchenguid/axi` repo).
   and silently creates one, which is why `workers secret put` runs a
   read-only `secret list --name` first. Success line: "✨ Success! Uploaded
   secret <KEY>".
-- Workers write paths (real `deploy`, `secret put`) are unit-tested only;
-  live smoke covers `workers deploy --dry-run`, `secret list`, the `--name`
-  mismatch refusal and the `secret put` NOT_FOUND precheck (2026-10-09,
-  family-haze-bot). Never smoke a real deploy or put against a live Worker.
+- Workers write paths were smoke-tested live on 2026-10-12 on a throwaway
+  Worker (#45, wrangler 4.127.1): `workers deploy --name --config` listed the
+  version id, the workers.dev url and the crons, and a `--name` mismatch was
+  refused with no Worker created; `secret put` created then updated, with
+  the value absent from the output and from `AXI_DEBUG=1`; `--name` of a
+  missing Worker gave `NOT_FOUND` after only `secret list`, with no draft
+  Worker. Read-only paths (`deploy --dry-run`, `secret list`) were checked
+  on 2026-10-09 (family-haze-bot). Live smokes use throwaway
+  `axi-smoke-<date>-*` names and must clean up afterwards; there is no axi
+  command to delete a Worker or a single secret yet (#47), so use raw
+  `wrangler delete` under `AXI_GAP=simkimsia/cloudflare-axi#47` (and #46 for
+  KV namespaces). Never smoke a real deploy or put against a real Worker.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`
