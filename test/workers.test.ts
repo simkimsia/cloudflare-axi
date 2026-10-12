@@ -573,6 +573,24 @@ describe("--config in follow-up hints", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("a raw wrangler hint runs from the config's directory too", async () => {
+    // No deploy entry in the output file: wrangler named no Worker.
+    fakeWrangler(() => ({ stdout: DRY_RUN_STDOUT }));
+    const err = await failure(
+      workersCommand([
+        "deploy",
+        "--name",
+        "family-haze-bot",
+        "--config",
+        spaced,
+      ]),
+    );
+    expect(err.code).toBe("UNKNOWN");
+    expect(err.suggestions.join(" ")).toContain(
+      `wrangler deploy --dry-run --cwd '${join(dir, "my worker")}' --config ${quoted}\``,
+    );
+  });
+
   it("a config with no entry point is VALIDATION_ERROR with a --config hint", async () => {
     fakeWrangler(() => ({
       stderr:

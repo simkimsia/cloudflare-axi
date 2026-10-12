@@ -3,7 +3,7 @@ import {
   configArgs,
   configRunOptions,
   configSource,
-  configSuffix,
+  wranglerConfigSuffix,
   takeConfig,
   withConfigContext,
 } from "../config.js";
@@ -74,8 +74,8 @@ export async function deploymentsCommand(args: string[]): Promise<string> {
     `count: ${deployments.length} deployments (newest first)`,
     renderList("deployments", rows),
     renderHelp([
-      `Run \`wrangler deployments status${configSuffix(config)}\` for the active deployment`,
-      `Run \`wrangler versions list${configSuffix(config)}\` for uploaded versions`,
+      `Run \`wrangler deployments status${wranglerConfigSuffix(config)}\` for the active deployment`,
+      `Run \`wrangler versions list${wranglerConfigSuffix(config)}\` for uploaded versions`,
     ]),
   ]);
 }

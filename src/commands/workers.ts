@@ -15,6 +15,7 @@ import {
   resolveConfigPath,
   takeConfig,
   withConfigContext,
+  wranglerConfigSuffix,
 } from "../config.js";
 import { AxiError, NOT_LINKED_SUGGESTIONS, stripAnsi } from "../errors.js";
 import { encode, renderHelp, renderList, renderOutput } from "../toon.js";
@@ -256,7 +257,7 @@ async function runDeploy(
       "wrangler reported no Worker name on the --dry-run, so --name cannot be checked",
       "UNKNOWN",
       [
-        `Rerun \`wrangler deploy --dry-run${suffix}\` to see its full output, then report the gap at https://github.com/simkimsia/cloudflare-axi/issues`,
+        `Rerun \`wrangler deploy --dry-run${wranglerConfigSuffix(config)}\` to see its full output, then report the gap at https://github.com/simkimsia/cloudflare-axi/issues`,
       ],
     );
   }

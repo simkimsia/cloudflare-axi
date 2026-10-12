@@ -81,7 +81,12 @@ describe("deployments --config", () => {
     ]);
     expect(calls[0].cwd).toBe(dir);
     expect(out).toContain("count: 2 deployments (newest first)");
-    expect(out).toContain(`wrangler deployments status --config ${config}`);
+    expect(out).toContain(
+      `wrangler deployments status --cwd ${dir} --config ${config}\``,
+    );
+    expect(out).toContain(
+      `wrangler versions list --cwd ${dir} --config ${config}\``,
+    );
   });
 
   it("accepts --config=<path>", async () => {

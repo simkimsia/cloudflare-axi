@@ -104,6 +104,17 @@ export function configSuffix(config: string | undefined): string {
   return config ? ` --config ${shellQuote(config)}` : "";
 }
 
+/**
+ * ` --cwd <dir> --config <path>` for raw `wrangler` hints: the wrapper runs
+ * wrangler from the config's directory (`.env`, `build.command`), so a
+ * suggested raw command must too, or it reads the caller's directory instead.
+ */
+export function wranglerConfigSuffix(config: string | undefined): string {
+  return config
+    ? ` --cwd ${shellQuote(dirname(config))}${configSuffix(config)}`
+    : "";
+}
+
 /** Where the Worker comes from, for output lines. */
 export function configSource(config: string | undefined): string {
   return config ?? "this directory";

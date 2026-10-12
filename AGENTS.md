@@ -65,7 +65,9 @@ the upstream `kunchenguid/axi` repo).
   `main`/`assets` against the config but runs a custom `build.command`, reads
   `.env` and writes `.wrangler/` against the process cwd. A child cwd rather
   than wrangler's own global `--cwd` keeps older 4.x working. `configSuffix`
-  threads `--config` into next-step hints; `withConfigContext` rewrites a
+  threads `--config` into next-step hints (absolute, `shellQuote`d);
+  `wranglerConfigSuffix` adds `--cwd <config dir>` to raw `wrangler` hints so
+  they read the same `.env` and build dir as the wrapper; `withConfigContext` rewrites a
   NOT_LINKED under `--config` to name the config. `liftLeadingConfig` in
   `src/cli.ts` accepts a leading `--config` (the SDK rejects leading flags):
   alone it feeds the dashboard, otherwise it moves to the end of argv where
