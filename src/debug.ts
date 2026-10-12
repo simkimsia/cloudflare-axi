@@ -39,8 +39,10 @@ export function debugLine(
   write(`[axi-debug] ${redactSecrets(line, env)}\n`);
 }
 
-export function debugWrangler(args: string[]): void {
-  debugLine(["wrangler", ...args].map(shellQuote).join(" "));
+export function debugWrangler(args: string[], cwd?: string): void {
+  const line = ["wrangler", ...args].map(shellQuote).join(" ");
+  // A `--config` run spawns wrangler in the config's directory; say where.
+  debugLine(cwd ? `${line}  # cwd: ${shellQuote(cwd)}` : line);
 }
 
 export function debugApi(method: string, path: string): void {

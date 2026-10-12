@@ -1,14 +1,39 @@
-import { assertNoArgs } from "../args.js";
+import { rejectExtraArgs } from "../args.js";
+import {
+  configArgs,
+  configRunOptions,
+  configSource,
+  configSuffix,
+  takeConfig,
+  withConfigContext,
+} from "../config.js";
 import { relativeTime, renderHelp, renderList, renderOutput } from "../toon.js";
 import { wranglerJson } from "../wrangler.js";
 
-export const DEPLOYMENTS_HELP = `usage: cloudflare-axi deployments
+export const DEPLOYMENTS_HELP = `usage: cloudflare-axi deployments [--config <path>]
 Lists the 10 most recent deployments of the Worker configured in the current directory
-(wrangler.toml / wrangler.jsonc). Directory-scoped, like \`wrangler deployments list\`.
-flags: none
+(wrangler.toml / wrangler.jsonc), or in the config given by --config.
+Directory-scoped, like \`wrangler deployments list\`.
+flags[1]:
+  --config <path> (the Worker's wrangler config; wrangler runs from its directory, so no cd is needed)
 examples:
   cloudflare-axi deployments
+  cloudflare-axi deployments --config ~/Projects/my-worker/wrangler.toml
 `;
+
+const USAGE = "cloudflare-axi deployments [--config <path>]";
+
+/** `wrangler deployments list --json`, from cwd or from the config's directory. */
+export function listDeployments(
+  config: string | undefined,
+): Promise<WranglerDeployment[]> {
+  return withConfigContext(config, () =>
+    wranglerJson<WranglerDeployment[]>(
+      ["deployments", "list", "--json", ...configArgs(config)],
+      configRunOptions(config),
+    ),
+  );
+}
 
 /** Shape of `wrangler deployments list --json` entries (wrangler 4.x). */
 export interface WranglerDeployment {
@@ -33,15 +58,13 @@ export function toDeploymentRows(
 }
 
 export async function deploymentsCommand(args: string[]): Promise<string> {
-  assertNoArgs("deployments", args);
-  const deployments = await wranglerJson<WranglerDeployment[]>([
-    "deployments",
-    "list",
-    "--json",
-  ]);
+  const rest = [...args];
+  const config = takeConfig(rest);
+  rejectExtraArgs("deployments", rest, USAGE);
+  const deployments = await listDeployments(config);
 
   if (deployments.length === 0) {
-    return "deployments: 0 deployments found for this Worker";
+    return `deployments: 0 deployments found for the Worker configured in ${configSource(config)}`;
   }
 
   // wrangler sorts oldest-first; newest-first reads better for agents.
@@ -51,8 +74,8 @@ export async function deploymentsCommand(args: string[]): Promise<string> {
     `count: ${deployments.length} deployments (newest first)`,
     renderList("deployments", rows),
     renderHelp([
-      "Run `wrangler deployments status` for the active deployment",
-      "Run `wrangler versions list` for uploaded versions",
+      `Run \`wrangler deployments status${configSuffix(config)}\` for the active deployment`,
+      `Run \`wrangler versions list${configSuffix(config)}\` for uploaded versions`,
     ]),
   ]);
 }

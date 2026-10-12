@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   assertNoArgs,
   rejectExtraArgs,
@@ -7,7 +6,18 @@ import {
   takeFlag,
   takePositional,
 } from "../args.js";
-import { AxiError, stripAnsi } from "../errors.js";
+import {
+  configArgs,
+  configRunOptions,
+  configSource,
+  configSuffix,
+  findWranglerConfig,
+  resolveConfigPath,
+  shellQuote,
+  takeConfig,
+  withConfigContext,
+} from "../config.js";
+import { AxiError, NOT_LINKED_SUGGESTIONS, stripAnsi } from "../errors.js";
 import { encode, renderHelp, renderList, renderOutput } from "../toon.js";
 import {
   wranglerExec,
@@ -26,6 +36,7 @@ flags{secret}:
   --name <worker> (required for put), --config <path>
 notes:
   deploy is directory-scoped like \`wrangler deploy\`: it deploys the wrangler config in cwd (or --config)
+  --config <path> works from any directory: wrangler runs from the config's directory (relative --outdir still resolves against your cwd)
   a real deploy runs \`wrangler deploy --dry-run\` first and refuses when --name differs from the Worker name wrangler resolves
   deploy --dry-run bundles locally and uploads nothing
   secret put reads the value from stdin only; it never takes it as an argument and never prints it
@@ -35,6 +46,7 @@ notes:
   not wrapped yet: tail, secret delete, secret bulk, --env; use \`wrangler\` for those
 examples:
   cloudflare-axi workers deploy --dry-run
+  cloudflare-axi workers deploy --dry-run --config ~/Projects/family-haze-bot/wrangler.toml
   cloudflare-axi workers deploy --name family-haze-bot
   cloudflare-axi workers secret list --name family-haze-bot
   printf %s "$TELEGRAM_BOT_TOKEN" | cloudflare-axi workers secret put TELEGRAM_BOT_TOKEN --name family-haze-bot
@@ -46,11 +58,6 @@ const USAGE = {
   put: 'printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name <worker> [--config <path>]',
   list: "cloudflare-axi workers secret list [--name <worker>] [--config <path>]",
 };
-
-const NOT_LINKED_SUGGESTIONS = [
-  "Run from a directory with a wrangler config (wrangler.toml / wrangler.jsonc)",
-  "Or pass `--config <path>` to the Worker's wrangler config",
-];
 
 // ---- pure helpers (exported for tests) ----
 
@@ -119,22 +126,6 @@ export function splitTargets(targets: unknown): {
   return out;
 }
 
-const CONFIG_NAMES = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"];
-
-/** Walk up from startDir like wrangler's find-up; return the first config found. */
-export function findWranglerConfig(startDir: string): string | undefined {
-  let dir = resolve(startDir);
-  for (;;) {
-    for (const name of CONFIG_NAMES) {
-      const candidate = join(dir, name);
-      if (existsSync(candidate)) return candidate;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-}
-
 export interface WranglerSecret {
   name: string;
   type: string;
@@ -147,34 +138,10 @@ export function toSecretRows(
 }
 
 /**
- * Quote one shell word for a copy-pasteable hint: left bare when every char is
- * in a safe set, else single-quoted (embedded ' becomes '\''). A leading "~"
- * is quoted too, since a shell would expand it.
- */
-export function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=-][A-Za-z0-9_./~:@%+=-]*$/.test(value)) return value;
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-/** " --config <quoted path>" when the user passed --config, else "". */
-function configFlag(config: string | undefined): string {
-  return config === undefined ? "" : ` --config ${shellQuote(config)}`;
-}
-
-/**
- * `deployments` has no --config (it is cwd-scoped like `wrangler deployments
- * list`), so with --config point at the config's directory instead.
- */
-function deploymentsHint(config: string | undefined, purpose: string): string {
-  return config === undefined
-    ? `Run \`cloudflare-axi deployments\` ${purpose}`
-    : `Run \`cloudflare-axi deployments\` from ${shellQuote(dirname(resolve(config)))} (the config's directory) ${purpose}`;
-}
-
-/**
- * Carry the user's --config into every `cloudflare-axi workers ...` command
- * an error suggests (mapped wrangler errors in errors.ts cannot know it), so
- * the follow-up targets the same Worker from any cwd.
+ * Carry the user's --config into every `cloudflare-axi workers ...` or
+ * `cloudflare-axi deployments` command an error suggests (mapped wrangler
+ * errors in errors.ts cannot know it), so the follow-up targets the same
+ * Worker from any cwd.
  */
 export function carryConfig(
   error: unknown,
@@ -185,10 +152,12 @@ export function carryConfig(
     error.message,
     error.code,
     error.suggestions.map((s) =>
-      s.replace(/`(cloudflare-axi workers [^`]*)`/g, (whole, cmd: string) =>
-        /(^|\s)--config(\s|=|$)/.test(cmd)
-          ? whole
-          : `\`${cmd}${configFlag(config)}\``,
+      s.replace(
+        /`(cloudflare-axi (?:workers [^`]*|deployments(?: [^`]*)?))`/g,
+        (whole, cmd: string) =>
+          /(^|\s)--config(\s|=|$)/.test(cmd)
+            ? whole
+            : `\`${cmd}${configSuffix(config)}\``,
       ),
     ),
   );
@@ -218,16 +187,9 @@ export const stdinSource = {
 
 // ---- deploy ----
 
-function assertConfig(config: string | undefined): void {
-  if (config !== undefined) {
-    if (!existsSync(resolve(config))) {
-      throw new AxiError(`${config} does not exist`, "VALIDATION_ERROR", [
-        "Pass the path to the Worker's wrangler.toml / wrangler.jsonc",
-      ]);
-    }
-    return;
-  }
-  if (!findWranglerConfig(process.cwd())) {
+/** Without --config, require a wrangler config in cwd or a parent (--config is validated by takeConfig). */
+function assertLinked(config: string | undefined): void {
+  if (config === undefined && !findWranglerConfig(process.cwd())) {
     throw new AxiError(
       "No Worker is configured in this directory",
       "NOT_LINKED",
@@ -238,12 +200,15 @@ function assertConfig(config: string | undefined): void {
 
 async function deploy(args: string[]): Promise<string> {
   const name = takeFlag(args, "--name");
-  const config = takeFlag(args, "--config");
-  const outdir = takeFlag(args, "--outdir");
+  const config = takeConfig(args);
+  const outdirFlag = takeFlag(args, "--outdir");
   const dryRun = takeBoolFlag(args, "--dry-run");
   rejectExtraArgs("workers deploy", args, USAGE.deploy);
 
-  assertConfig(config);
+  assertLinked(config);
+  // wrangler resolves --outdir against its own cwd, which is the config's
+  // directory under --config; resolve it against the caller's cwd first.
+  const outdir = outdirFlag === undefined ? undefined : resolve(outdirFlag);
   try {
     return await runDeploy(name, config, outdir, dryRun);
   } catch (error) {
@@ -257,7 +222,7 @@ async function runDeploy(
   outdir: string | undefined,
   dryRun: boolean,
 ): Promise<string> {
-  const cfg = configFlag(config);
+  const suffix = configSuffix(config);
   if (!dryRun && !name) {
     // VISION.md safety: a write names its target in full, never inferred.
     throw new AxiError(
@@ -265,29 +230,34 @@ async function runDeploy(
       "VALIDATION_ERROR",
       [
         USAGE.deploy,
-        `Run \`cloudflare-axi workers deploy --dry-run${cfg}\` to see the Worker name this config deploys`,
+        `Run \`cloudflare-axi workers deploy --dry-run${suffix}\` to see the Worker name this config deploys`,
       ],
     );
   }
 
-  const configArgs = config ? ["--config", config] : [];
   const outdirArgs = outdir ? ["--outdir", outdir] : [];
+  const runOptions = configRunOptions(config);
 
   // Read-only pass: bundle locally and learn the Worker name wrangler
   // resolves from the config. Nothing is uploaded.
-  const check = await wranglerExecWithOutput([
-    "deploy",
-    "--dry-run",
-    ...configArgs,
-    ...(dryRun ? outdirArgs : []),
-  ]);
+  const check = await withConfigContext(config, () =>
+    wranglerExecWithOutput(
+      [
+        "deploy",
+        "--dry-run",
+        ...configArgs(config),
+        ...(dryRun ? outdirArgs : []),
+      ],
+      runOptions,
+    ),
+  );
   const resolved = str(lastDeployEntry(check.entries)?.worker_name);
   if (name && !resolved) {
     throw new AxiError(
       "wrangler reported no Worker name on the --dry-run, so --name cannot be checked",
       "UNKNOWN",
       [
-        `Rerun \`wrangler deploy --dry-run${cfg}\` to see its full output, then report the gap at https://github.com/simkimsia/cloudflare-axi/issues`,
+        `Rerun \`wrangler deploy --dry-run${suffix}\` to see its full output, then report the gap at https://github.com/simkimsia/cloudflare-axi/issues`,
       ],
     );
   }
@@ -296,7 +266,7 @@ async function runDeploy(
       `--name ${name} does not match the Worker this config deploys (${resolved})`,
       "VALIDATION_ERROR",
       [
-        `Run \`cloudflare-axi workers deploy --name ${resolved}${cfg}\` to deploy it, or fix \`name\` in the wrangler config`,
+        `Run \`cloudflare-axi workers deploy --name ${resolved}${suffix}\` to deploy it, or fix \`name\` in ${config ?? "the wrangler config"}`,
       ],
     );
   }
@@ -312,7 +282,7 @@ async function runDeploy(
       }),
       bindings.length > 0 ? renderList("bindings", bindings) : "bindings: none",
       renderHelp([
-        `Run \`cloudflare-axi workers deploy --name ${resolved ?? "<worker>"}${cfg}\` to upload and deploy it`,
+        `Run \`cloudflare-axi workers deploy --name ${resolved ?? "<worker>"}${suffix}\` to upload and deploy it`,
       ]),
     ]);
   }
@@ -322,11 +292,10 @@ async function runDeploy(
   // The dry-run above already proved it matches.
   const worker = name as string;
   const started = Date.now();
-  const result = await wranglerExecWithOutput([
-    "deploy",
-    ...configArgs,
-    ...outdirArgs,
-  ]);
+  const result = await wranglerExecWithOutput(
+    ["deploy", ...configArgs(config), ...outdirArgs],
+    runOptions,
+  );
   const elapsed = `${((Date.now() - started) / 1000).toFixed(1)}s`;
   const entry = lastDeployEntry(result.entries);
   const version =
@@ -336,7 +305,9 @@ async function runDeploy(
     throw new AxiError(
       `wrangler reported no version id: ${result.stdout.trim().split("\n").pop() ?? ""}`,
       "UNKNOWN",
-      [deploymentsHint(config, "to check whether it deployed")],
+      [
+        `Run \`cloudflare-axi deployments${suffix}\` to check whether it deployed`,
+      ],
     );
   }
   // Without wrangler's deploy entry (or its targets) we cannot tell "no
@@ -379,13 +350,12 @@ async function runDeploy(
         : [
             "urls and crons are unknown: wrangler wrote no deploy details to its output file; check the Worker's triggers in the Cloudflare dashboard",
           ]),
-      deploymentsHint(
-        config,
+      `Run \`cloudflare-axi deployments${suffix}\` ${
         targetsKnown
           ? "for the deployment history"
-          : "to confirm this version is live",
-      ),
-      `Run \`cloudflare-axi workers secret list --name ${worker}${cfg}\` to check its secrets`,
+          : "to confirm this version is live"
+      }`,
+      `Run \`cloudflare-axi workers secret list --name ${worker}${suffix}\` to check its secrets`,
     ]),
   ]);
 }
@@ -396,19 +366,24 @@ async function listSecrets(
   name: string | undefined,
   config: string | undefined,
 ): Promise<WranglerSecret[]> {
-  return wranglerJson<WranglerSecret[]>([
-    "secret",
-    "list",
-    "--format",
-    "json",
-    ...(name ? ["--name", name] : []),
-    ...(config ? ["--config", config] : []),
-  ]);
+  return withConfigContext(config, () =>
+    wranglerJson<WranglerSecret[]>(
+      [
+        "secret",
+        "list",
+        "--format",
+        "json",
+        ...(name ? ["--name", name] : []),
+        ...configArgs(config),
+      ],
+      configRunOptions(config),
+    ),
+  );
 }
 
 async function secretList(args: string[]): Promise<string> {
   const name = takeFlag(args, "--name");
-  const config = takeFlag(args, "--config");
+  const config = takeConfig(args);
   rejectExtraArgs("workers secret list", args, USAGE.list);
 
   let secrets: WranglerSecret[];
@@ -417,21 +392,21 @@ async function secretList(args: string[]): Promise<string> {
   } catch (error) {
     throw carryConfig(error, config);
   }
-  const cfg = configFlag(config);
   const worker = name ?? "<worker>";
+  const suffix = configSuffix(config);
   // wrangler's secret list JSON does not name the Worker it resolved, so
   // without --name point at a command that shows it.
   const findName = name
     ? []
     : [
-        `Run \`cloudflare-axi workers deploy --dry-run${cfg}\` to see the Worker name this config deploys`,
+        `Run \`cloudflare-axi workers deploy --dry-run${suffix}\` to see the Worker name this config deploys`,
       ];
   if (secrets.length === 0) {
     return renderOutput([
-      `secrets: 0 secrets on ${name ?? "the Worker configured in this directory"}`,
+      `secrets: 0 secrets on ${name ?? `the Worker configured in ${configSource(config)}`}`,
       renderHelp([
         ...findName,
-        `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}${cfg}\` to add one`,
+        `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}${suffix}\` to add one`,
       ]),
     ]);
   }
@@ -441,7 +416,7 @@ async function secretList(args: string[]): Promise<string> {
     renderHelp([
       "Values are write-only; Cloudflare never returns them",
       ...findName,
-      `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}${cfg}\` to add or rotate one`,
+      `Run \`printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name ${worker}${suffix}\` to add or rotate one`,
     ]),
   ]);
 }
@@ -475,7 +450,7 @@ const KNOWN_PUT_FLAGS = new Set(["--name", "--config", "--env", "--help"]);
 
 async function secretPut(args: string[]): Promise<string> {
   const name = takeFlag(args, "--name");
-  const config = takeFlag(args, "--config");
+  const rawConfig = takeFlag(args, "--config");
   const key = takePositional(args);
   if (args.length > 0) {
     // Never echo leftovers: a stray token is most likely the secret value,
@@ -507,9 +482,7 @@ async function secretPut(args: string[]): Promise<string> {
     // VISION.md safety: the Worker is named in full, never inferred.
     throw new AxiError("--name is required", "VALIDATION_ERROR", [
       USAGE.put,
-      config === undefined
-        ? "Run `cloudflare-axi workers deploy --dry-run` to see the Worker name in this directory"
-        : `Run \`cloudflare-axi workers deploy --dry-run${configFlag(config)}\` to see the Worker name this config deploys`,
+      `Run \`cloudflare-axi workers deploy --dry-run${rawConfig === undefined ? "" : ` --config ${shellQuote(rawConfig)}`}\` to see the Worker name ${rawConfig === undefined ? "in this directory" : "this config deploys"}`,
     ]);
   }
   if (stdinSource.isTTY()) {
@@ -526,21 +499,17 @@ async function secretPut(args: string[]): Promise<string> {
     ]);
   }
 
+  let config: string | undefined;
   try {
+    // Validated inside the try so its error passes through redactValue too.
+    config = rawConfig === undefined ? undefined : resolveConfigPath(rawConfig);
     // Read-only precheck: wrangler's `secret put` silently creates a draft
     // Worker when the name does not exist. A missing Worker is NOT_FOUND here.
     const existing = await listSecrets(name, config);
     const status = existing.some((s) => s.name === key) ? "updated" : "created";
     await wranglerExec(
-      [
-        "secret",
-        "put",
-        key,
-        "--name",
-        name,
-        ...(config ? ["--config", config] : []),
-      ],
-      { input: value },
+      ["secret", "put", key, "--name", name, ...configArgs(config)],
+      { ...configRunOptions(config), input: value },
     );
     return renderOutput([
       encode({
@@ -550,7 +519,7 @@ async function secretPut(args: string[]): Promise<string> {
         note: "applies immediately as a new deployed Worker version",
       }),
       renderHelp([
-        `Run \`cloudflare-axi workers secret list --name ${name}${configFlag(config)}\` to confirm`,
+        `Run \`cloudflare-axi workers secret list --name ${name}${configSuffix(config)}\` to confirm`,
       ]),
     ]);
   } catch (caught) {
