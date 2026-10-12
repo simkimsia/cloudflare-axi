@@ -211,8 +211,11 @@ the upstream `kunchenguid/axi` repo).
   on 2026-10-09 (family-haze-bot). Live smokes use throwaway
   `axi-smoke-<date>-*` names and must clean up afterwards; there is no axi
   command to delete a Worker or a single secret yet (#47), so use raw
-  `wrangler delete` under `AXI_GAP=simkimsia/cloudflare-axi#47` (and #46 for
-  KV namespaces). Never smoke a real deploy or put against a real Worker.
+  `wrangler delete <worker>` or `wrangler secret delete <KEY> --name
+  <worker>` under `AXI_GAP=simkimsia/cloudflare-axi#47`, and
+  `wrangler kv namespace delete --namespace-id <id>` under
+  `AXI_GAP=simkimsia/cloudflare-axi#46`. Never smoke a real deploy or put
+  against a real Worker.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`
