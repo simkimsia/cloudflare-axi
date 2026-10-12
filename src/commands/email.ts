@@ -874,6 +874,13 @@ type EmailSubcommand = (typeof SUBCOMMANDS)[number];
 export async function emailCommand(args: string[]): Promise<string> {
   const rest = [...args];
   const zoneArg = takeFlag(rest, "--zone");
+  // Reject --config before taking the subcommand, or its path value would be
+  // read as an unknown subcommand instead of naming the flag.
+  rejectExtraArgs(
+    "email",
+    rest.filter((a) => a === "--config" || a.startsWith("--config=")),
+    USAGE,
+  );
   const sub = takePositional(rest);
   if (sub !== undefined && !(SUBCOMMANDS as readonly string[]).includes(sub)) {
     throw new AxiError(

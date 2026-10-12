@@ -226,6 +226,18 @@ describe("account-scoped commands reject --config", () => {
     expect(out).toContain("VALIDATION_ERROR");
     expect(calls).toHaveLength(0);
   });
+
+  it.each([
+    ["leading", (c: string) => ["--config", c, "email", "--zone", "z.com"]],
+    ["trailing", (c: string) => ["email", "--zone", "z.com", "--config", c]],
+  ])("email (%s) names --config, not the path", async (_label, argv) => {
+    const calls = fakeWrangler(() => ({}));
+    const { out, code } = await run(argv(config));
+    expect(code).toBe(2);
+    expect(out).toContain("unknown flag --config");
+    expect(out).not.toContain("unknown subcommand");
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe("liftLeadingConfig", () => {
