@@ -177,6 +177,15 @@ the upstream `kunchenguid/axi` repo).
   to assets directory" comes from a config with `name` but no `main` or
   `[assets]` (also from no config with `--autoconfig=false`), so it maps to
   `VALIDATION_ERROR` "wrangler config has no entry point".
+- Broken paths in a deploy config (captured live 2026-10-12, `--dry-run`):
+  a missing `main` file → 'The entry-point file at "src/worker.js" was not
+  found.' (or, with `[build] command`, 'The expected output file at "…" was
+  not found after running custom build: …'); a missing `[assets] directory`
+  → 'The directory specified by the "assets.directory" field in your
+  configuration file does not exist:' with the absolute path on the next
+  line ("doesn't point to a directory:" for a file). All map to
+  `VALIDATION_ERROR` naming the path, ahead of the catch-all "not found"
+  (#43, #44).
 - `wrangler secret list` prints JSON by default (`[{name, type}]`, no
   banner). Missing Worker → 'Worker "x" not found.' (`NOT_FOUND`); no config
   and no `--name` → "Required Worker name missing" (`NOT_LINKED`).

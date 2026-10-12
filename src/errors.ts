@@ -237,6 +237,25 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
+    // Real stderr (`wrangler deploy --dry-run` where `[assets] directory`
+    // is missing, wrangler 4.127.1, captured 2026-10-12): 'The directory
+    // specified by the "assets.directory" field in your configuration file
+    // does not exist:' then the absolute path on its own indented line. A
+    // path that is a file says "doesn't point to a directory:" instead.
+    pattern:
+      /The (?:directory|path) specified by the "assets\.directory" field in your configuration file (does not exist|doesn't point to a directory):\s*\n\s*(\S[^\n]*)/i,
+    code: "VALIDATION_ERROR",
+    message: (m) =>
+      `[assets] directory ${m[2].trim()} ${
+        /does not exist/i.test(m[1]) ? "does not exist" : "is not a directory"
+      }`,
+    suggestions: [
+      "Fix `[assets] directory` in the wrangler config (relative to the config file), or create that directory",
+      "If a build generates it, run the build first",
+      "Then check it with `cloudflare-axi workers deploy --dry-run`",
+    ],
+  },
+  {
     // Real stderr (`wrangler deploy` with no config in cwd, autoconfig on by
     // default): "Could not detect a directory containing static files".
     // Autoconfig only runs without a config, so this one does mean no

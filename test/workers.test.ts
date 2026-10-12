@@ -624,6 +624,22 @@ describe("--config in follow-up hints", () => {
     );
   });
 
+  it("a missing [assets] directory is VALIDATION_ERROR with a --config hint (#44)", async () => {
+    const assetsDir = join(dir, "my worker", "public");
+    fakeWrangler(() => ({
+      stderr: `\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mThe directory specified by the "assets.directory" field in your configuration file does not exist:\u001b[0m\n\n  ${assetsDir}\n\n\n`,
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand(["deploy", "--dry-run", "--config", spaced]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe(`[assets] directory ${assetsDir} does not exist`);
+    expect(err.suggestions.join(" ")).toContain(
+      `workers deploy --dry-run --config ${quoted}\``,
+    );
+  });
+
   it("secret list hints and mapped errors carry --config", async () => {
     fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
     const out = await workersCommand(["secret", "list", "--config", spaced]);
