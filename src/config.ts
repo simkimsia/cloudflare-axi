@@ -62,7 +62,7 @@ export function resolveConfigPath(config: string): string {
       "VALIDATION_ERROR",
       [
         inside
-          ? `Use \`--config ${inside}\``
+          ? `Use \`--config ${shellQuote(inside)}\``
           : "Pass the path to the Worker's wrangler.toml / wrangler.jsonc",
       ],
     );

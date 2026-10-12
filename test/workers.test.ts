@@ -707,6 +707,23 @@ describe("workers secret put", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("points the --name hint at the absolute config path", async () => {
+    pipeStdin(SECRET);
+    fakeWrangler(() => ({}));
+    const err = await failure(
+      workersCommand([
+        "secret",
+        "put",
+        "API_KEY",
+        "--config",
+        "../w/wrangler.toml",
+      ]),
+    );
+    expect(err.suggestions).toContain(
+      `Run \`cloudflare-axi workers deploy --dry-run --config ${shellQuote(resolve("../w/wrangler.toml"))}\` to see the Worker name this config deploys`,
+    );
+  });
+
   it("refuses a TTY stdin and an empty stdin", async () => {
     const calls = fakeWrangler(() => ({}));
     pipeStdin("", true);

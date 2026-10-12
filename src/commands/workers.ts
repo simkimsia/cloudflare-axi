@@ -13,7 +13,6 @@ import {
   configSuffix,
   findWranglerConfig,
   resolveConfigPath,
-  shellQuote,
   takeConfig,
   withConfigContext,
 } from "../config.js";
@@ -482,7 +481,7 @@ async function secretPut(args: string[]): Promise<string> {
     // VISION.md safety: the Worker is named in full, never inferred.
     throw new AxiError("--name is required", "VALIDATION_ERROR", [
       USAGE.put,
-      `Run \`cloudflare-axi workers deploy --dry-run${rawConfig === undefined ? "" : ` --config ${shellQuote(rawConfig)}`}\` to see the Worker name ${rawConfig === undefined ? "in this directory" : "this config deploys"}`,
+      `Run \`cloudflare-axi workers deploy --dry-run${configSuffix(rawConfig === undefined ? undefined : resolve(rawConfig))}\` to see the Worker name ${rawConfig === undefined ? "in this directory" : "this config deploys"}`,
     ]);
   }
   if (stdinSource.isTTY()) {
