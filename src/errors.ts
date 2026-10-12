@@ -58,7 +58,8 @@ export function stripAnsi(text: string): string {
 interface ErrorPattern {
   pattern: RegExp;
   code: ErrorCode;
-  message?: string;
+  /** Fixed text, or built from the regex match (e.g. to name a path). */
+  message?: string | ((match: RegExpExecArray) => string);
   suggestions: string[];
 }
 
@@ -217,6 +218,25 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
+    // Real stderr (`wrangler deploy --dry-run` where `main` names a missing
+    // file, wrangler 4.127.1, captured 2026-10-12): 'The entry-point file at
+    // "src/worker.js" was not found.' With a `[build] command` it says
+    // instead: 'The expected output file at "dist/worker.js" was not found
+    // after running custom build: <cmd>.' The path is relative to the
+    // config's directory. Must sit before the catch-all "not found" below,
+    // which would call it a missing Worker.
+    pattern:
+      /The (entry-point|expected output) file at "([^"]+)" was not found( after running custom build)?/i,
+    code: "VALIDATION_ERROR",
+    message: (m) =>
+      `entry-point file ${m[2]} not found${m[3] ? " after the custom build" : ""}`,
+    suggestions: [
+      "Fix `main` in the wrangler config to point at the Worker script (relative to the config file)",
+      "If a build generates that file, run the build first or check the config's `[build] command`",
+      "Then check it with `cloudflare-axi workers deploy --dry-run`",
+    ],
+  },
+  {
     // Real stderr (`wrangler deploy` with no config in cwd, autoconfig on by
     // default): "Could not detect a directory containing static files".
     // Autoconfig only runs without a config, so this one does mean no
@@ -239,9 +259,14 @@ const patterns: ErrorPattern[] = [
 export function mapWranglerError(stderr: string, exitCode: number): AxiError {
   const trimmed = stripAnsi(stderr).trim();
   for (const entry of patterns) {
-    if (entry.pattern.test(trimmed)) {
+    const match = entry.pattern.exec(trimmed);
+    if (match) {
+      const message =
+        typeof entry.message === "function"
+          ? entry.message(match)
+          : entry.message;
       return new AxiError(
-        entry.message ?? errorLine(trimmed),
+        message ?? errorLine(trimmed),
         entry.code,
         entry.suggestions,
       );

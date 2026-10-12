@@ -608,6 +608,22 @@ describe("--config in follow-up hints", () => {
     );
   });
 
+  it("a missing `main` file is VALIDATION_ERROR with a --config hint (#43)", async () => {
+    fakeWrangler(() => ({
+      stderr:
+        '\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mThe entry-point file at "src/worker.js" was not found.\u001b[0m\n\n  \n  This might mean that your entry-point file needs to be generated (which is the general case when a framework is being used).\n',
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand(["deploy", "--dry-run", "--config", spaced]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe("entry-point file src/worker.js not found");
+    expect(err.suggestions.join(" ")).toContain(
+      `workers deploy --dry-run --config ${quoted}\``,
+    );
+  });
+
   it("secret list hints and mapped errors carry --config", async () => {
     fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
     const out = await workersCommand(["secret", "list", "--config", spaced]);
