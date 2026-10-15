@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.4](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.3...cloudflare-axi-v0.2.4) (2026-10-15)
+
+
+### Features
+
+* **workers:** add workers delete and workers secret delete ([834bf54](https://github.com/simkimsia/cloudflare-axi/commit/834bf54bdd79229885bb576b43e764f11f1159db)), closes [#47](https://github.com/simkimsia/cloudflare-axi/issues/47)
+
+
+### Bug Fixes
+
+* **workers:** read the config's account_id with a TOML parser ([e47a92e](https://github.com/simkimsia/cloudflare-axi/commit/e47a92e1b3d688aaf6c84964745b531b2f8f8021)), closes [#47](https://github.com/simkimsia/cloudflare-axi/issues/47)
+
 ## [0.2.3](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.2...cloudflare-axi-v0.2.3) (2026-10-15)
 
 
