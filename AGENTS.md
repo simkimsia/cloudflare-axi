@@ -77,8 +77,11 @@ the upstream `kunchenguid/axi` repo).
 - `src/commands/workers.ts` — `workers deploy` (dry-run name check, then a
   real deploy that never forwards `--name`), `workers secret list|put`
   (value on stdin only; read-only `secret list` precheck before `put`;
-  `stdinSource` is the test seam). Bare `workers` prints its help and points
-  at `deployments`. A user's `--config` is carried, absolute and
+  `stdinSource` is the test seam), `workers delete` and
+  `workers secret delete` (both prechecked read-only with
+  `secret list --name`, so an unknown Worker or secret is NOT_FOUND with
+  nothing deleted). Bare `workers` prints its help and points at
+  `deployments`. A user's `--config` is carried, absolute and
   shell-quoted (`configSuffix` / `shellQuote` in `src/config.ts`), into every
   follow-up hint, including `workers` and `deployments` commands suggested by
   mapped wrangler errors (`carryConfig`). Without the ND-JSON `deploy` entry (or its
@@ -208,6 +211,26 @@ the upstream `kunchenguid/axi` repo).
   and silently creates one, which is why `workers secret put` runs a
   read-only `secret list --name` first. Success line: "✨ Success! Uploaded
   secret <KEY>".
+- `wrangler delete` (4.127.1 `src/delete.ts`) has no skip-confirmation
+  flag. Its `--force` skips both prompts ("Are you sure you want to delete
+  <name>?" and the "is currently in use by other Workers" one) and the
+  dependents check itself, and non-interactively (wrangler always runs with
+  piped stdio here) both prompts auto-confirm, so a plain run would break
+  dependents silently too. `workers delete` therefore reads the same two
+  endpoints wrangler does,
+  `GET /accounts/{a}/workers/scripts/{name}/references` and
+  `.../workers/tails/by-consumer/{name}` (`listDependents`), refuses when
+  anything depends on the Worker unless `--force`, then always runs
+  `wrangler delete --name <n> --force`. Success line: "Successfully deleted
+  <name>"; it also deletes Workers Sites asset namespaces ('Deleted asset
+  namespace for Workers Site "<title>"'). Without `--name` wrangler would
+  fall back to the cwd config's name, which is why `--name` is required.
+- `wrangler secret delete <KEY> --name <w>` has no skip-confirmation flag
+  either; its prompt auto-confirms non-interactively. It never creates a
+  draft Worker, but `workers secret delete` still prechecks with
+  `secret list --name` for NOT_FOUND on a missing Worker or key. Success
+  line: "✨ Success! Deleted secret <KEY>". Neither delete path has been
+  smoke-tested live yet.
 - Workers write paths were smoke-tested live on 2026-10-12 on a throwaway
   Worker (#45, wrangler 4.127.1): `workers deploy --name --config` listed the
   version id, the workers.dev url and the crons, and a `--name` mismatch was
@@ -216,13 +239,12 @@ the upstream `kunchenguid/axi` repo).
   missing Worker gave `NOT_FOUND` after only `secret list`, with no draft
   Worker. Read-only paths (`deploy --dry-run`, `secret list`) were checked
   on 2026-10-09 (family-haze-bot). Live smokes use throwaway
-  `axi-smoke-<date>-*` names and must clean up afterwards; there is no axi
-  command to delete a Worker or a single secret yet (#47), so use raw
-  `wrangler delete <worker>` or
-  `wrangler secret delete <KEY> --name <worker>` under
-  `AXI_GAP=simkimsia/cloudflare-axi#47`. Drop a throwaway KV namespace with
-  `cloudflare-axi kv drop <title>`. Never smoke a real deploy or put
-  against a real Worker.
+  `axi-smoke-<date>-*` names and must clean up afterwards: delete a
+  throwaway Worker (its secrets go with it) with
+  `cloudflare-axi workers delete --name <worker>`, a single secret with
+  `cloudflare-axi workers secret delete <KEY> --name <worker>`, and a
+  throwaway KV namespace with `cloudflare-axi kv drop <title>`. Never
+  smoke a real deploy, put or delete against a real Worker.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`

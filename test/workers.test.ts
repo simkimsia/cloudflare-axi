@@ -11,7 +11,9 @@ import { findWranglerConfig, shellQuote } from "../src/config.js";
 import { parseOutputEntries } from "../src/wrangler.js";
 import { failure, fakeWrangler } from "./fake-wrangler.js";
 import {
+  listDependents,
   parseBindings,
+  parseDeletedSiteNamespaces,
   parseUploadSize,
   redactValue,
   splitTargets,
@@ -914,7 +916,7 @@ describe("workers (bare)", () => {
     const out = await workersCommand([]);
     expect(calls).toEqual([]);
     expect(out).toContain("usage: cloudflare-axi workers");
-    expect(out).toContain("deploy, secret put <KEY>|list");
+    expect(out).toContain("deploy, delete, secret put <KEY>|list|delete <KEY>");
     expect(out).toContain(
       "Run `cloudflare-axi deployments` for recent deployments",
     );
@@ -1105,5 +1107,323 @@ describe("workers --config", () => {
     const err = await failure(workersCommand(["deploy", "--dry-run"]));
     expect(err.code).toBe("NOT_LINKED");
     expect(err.suggestions.join(" ")).toContain("--config <path>");
+  });
+});
+
+// ---- delete (issue #47) ----
+
+const WORKER = "axi-smoke-20261012-worker";
+// `wrangler delete` stdout shape from wrangler 4.127.1 source (src/delete.ts):
+// "Successfully deleted <name>", after one line per Workers Sites asset
+// namespace it removed.
+const DELETE_STDOUT = `\n ⛅️ wrangler 4.127.1\n───────────────────\n🌀 Deleted asset namespace for Workers Site "__${WORKER}-workers_sites_assets"\nSuccessfully deleted ${WORKER}\n`;
+// The same 'Worker "x" not found.' stderr with real ANSI escapes.
+const MISSING_WORKER_STDERR =
+  '\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mWorker "family-haze-bto" not found.\u001b[0m\n\n  If this is a new Worker, run `wrangler deploy` first to create it.';
+const SECRET_DELETE_STDOUT = `🌀 Deleting the secret WEBHOOK_SECRET on the Worker ${WORKER}\n✨ Success! Deleted secret WEBHOOK_SECRET\n`;
+const ok = (result: unknown) =>
+  new Response(
+    JSON.stringify({ success: true, errors: [], messages: [], result }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+const NO_REFERENCES = {
+  services: { incoming: [], pages_function: false },
+  durable_objects: [],
+  dispatch_outbounds: [],
+};
+
+/** Stub the REST API: references and tail consumers for the Worker in account "acc". */
+function stubApi(references: unknown = NO_REFERENCES, tails: unknown = []) {
+  const paths: string[] = [];
+  vi.stubEnv("CLOUDFLARE_API_TOKEN", "test-token");
+  vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acc");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = url.replace("https://api.cloudflare.com/client/v4", "");
+      paths.push(path);
+      if (path.endsWith("/references")) return ok(references);
+      if (path.includes("/tails/by-consumer/")) return ok(tails);
+      return new Response("{}", { status: 404 });
+    }),
+  );
+  return paths;
+}
+
+describe("listDependents", () => {
+  it("names every kind of dependent wrangler checks for", () => {
+    const lines = listDependents(
+      "api",
+      {
+        services: {
+          incoming: [{ service: "web", environment: "production" }],
+          pages_function: true,
+        },
+        durable_objects: [
+          { service: "api", durable_object_namespace_name: "SELF" },
+          { script: "chat", durable_object_namespace_name: "ROOMS" },
+        ],
+        dispatch_outbounds: [{ service: "router", namespace: "tenants" }],
+      },
+      [{ producer: { script: "logger" } }],
+    );
+    expect(lines).toEqual([
+      "Worker web (production) uses it as a Service Binding",
+      "A Pages project has a Service Binding to it",
+      'Worker chat binds the Durable Object namespace "ROOMS" it implements',
+      'Worker router uses it as the Outbound Worker of dispatch namespace "tenants"',
+      "Worker logger uses it as a Tail Worker",
+    ]);
+  });
+
+  it("is empty for a Worker nothing depends on", () => {
+    expect(listDependents("api", NO_REFERENCES, [])).toEqual([]);
+    expect(listDependents("api", {}, [])).toEqual([]);
+  });
+});
+
+describe("parseDeletedSiteNamespaces", () => {
+  it("picks the Workers Sites namespaces wrangler deleted", () => {
+    expect(parseDeletedSiteNamespaces(DELETE_STDOUT)).toEqual([
+      `__${WORKER}-workers_sites_assets`,
+    ]);
+    expect(parseDeletedSiteNamespaces("Successfully deleted x\n")).toEqual([]);
+  });
+});
+
+describe("workers delete", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("requires --name and never falls back to the cwd config", async () => {
+    const calls = fakeWrangler(() => ({}));
+    const err = await failure(workersCommand(["delete"]));
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe("--name is required");
+    expect(err.suggestions.join(" ")).toContain("workers deploy --dry-run");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a positional name and unknown flags before any call", async () => {
+    const calls = fakeWrangler(() => ({}));
+    expect(
+      (await failure(workersCommand(["delete", WORKER]))).message,
+    ).toContain(`unexpected argument ${WORKER}`);
+    expect(
+      (await failure(workersCommand(["delete", "--name", WORKER, "--yes"])))
+        .message,
+    ).toContain("unknown flag --yes");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("checks existence and dependents, then deletes with --force so wrangler never prompts", async () => {
+    const paths = stubApi();
+    const calls = fakeWrangler((args) =>
+      args[0] === "secret"
+        ? { stdout: SECRET_LIST_JSON }
+        : { stdout: DELETE_STDOUT },
+    );
+    const out = await workersCommand(["delete", "--name", WORKER]);
+    expect(calls.map((c) => c.args)).toEqual([
+      ["secret", "list", "--format", "json", "--name", WORKER],
+      ["delete", "--name", WORKER, "--force"],
+    ]);
+    expect(paths).toEqual([
+      `/accounts/acc/workers/scripts/${WORKER}/references`,
+      `/accounts/acc/workers/tails/by-consumer/${WORKER}`,
+    ]);
+    expect(out).toContain(`worker: ${WORKER}`);
+    expect(out).toContain("status: deleted");
+    expect(out).toContain("secrets: 2");
+    expect(out).toContain("cron triggers, routes");
+    expect(out).toContain(`__${WORKER}-workers_sites_assets`);
+    expect(out).toContain(
+      `cloudflare-axi workers secret list --name ${WORKER}\` to confirm it is gone`,
+    );
+    expect(out).not.toContain("not checked");
+  });
+
+  it("is NOT_FOUND for an unknown Worker, with nothing deleted", async () => {
+    const paths = stubApi();
+    const calls = fakeWrangler(() => ({
+      stderr: MISSING_WORKER_STDERR,
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand(["delete", "--name", "family-haze-bto"]),
+    );
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.message).toBe(
+      'Worker "family-haze-bto" not found; nothing deleted',
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args.slice(0, 2)).toEqual(["secret", "list"]);
+    expect(paths).toEqual([]);
+  });
+
+  it("refuses a Worker other Workers depend on and names them", async () => {
+    stubApi({ services: { incoming: [{ service: "web", environment: "" }] } }, [
+      { producer: { script: "logger" } },
+    ]);
+    const calls = fakeWrangler(() => ({ stdout: "[]" }));
+    const err = await failure(workersCommand(["delete", "--name", WORKER]));
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe(
+      `Worker ${WORKER} is in use by other Workers; nothing deleted`,
+    );
+    expect(err.suggestions).toContain(
+      "Worker web uses it as a Service Binding",
+    );
+    expect(err.suggestions).toContain("Worker logger uses it as a Tail Worker");
+    expect(err.suggestions.join(" ")).toContain(
+      `workers delete --name ${WORKER} --force`,
+    );
+    expect(calls.map((c) => c.args[0])).toEqual(["secret"]);
+  });
+
+  it("--force skips the dependents check and says so", async () => {
+    const paths = stubApi();
+    const calls = fakeWrangler((args) =>
+      args[0] === "secret" ? { stdout: "[]" } : { stdout: DELETE_STDOUT },
+    );
+    const out = await workersCommand(["delete", "--name", WORKER, "--force"]);
+    expect(paths).toEqual([]);
+    expect(calls[1].args).toEqual(["delete", "--name", WORKER, "--force"]);
+    expect(out).toContain("secrets: 0");
+    expect(out).toContain("dependents: not checked (--force)");
+  });
+
+  it("is UNKNOWN when wrangler does not confirm the delete", async () => {
+    stubApi();
+    fakeWrangler((args) =>
+      args[0] === "secret" ? { stdout: "[]" } : { stdout: "something else\n" },
+    );
+    const err = await failure(workersCommand(["delete", "--name", WORKER]));
+    expect(err.code).toBe("UNKNOWN");
+    expect(err.suggestions.join(" ")).toContain("secret list --name");
+  });
+
+  it("carries --config into wrangler and the hints", async () => {
+    stubApi();
+    const calls = fakeWrangler((args) =>
+      args[0] === "secret" ? { stdout: "[]" } : { stdout: DELETE_STDOUT },
+    );
+    const out = await workersCommand([
+      "delete",
+      "--name",
+      WORKER,
+      "--config",
+      config,
+    ]);
+    expect(calls[1].args).toEqual([
+      "delete",
+      "--name",
+      WORKER,
+      "--force",
+      "--config",
+      config,
+    ]);
+    expect(calls[1].cwd).toBe(dir);
+    expect(out).toContain(`--name ${WORKER} --config ${shellQuote(config)}`);
+  });
+});
+
+describe("workers secret delete", () => {
+  it("deletes an exactly named secret after a read-only precheck", async () => {
+    const calls = fakeWrangler((args) =>
+      args[1] === "list"
+        ? { stdout: SECRET_LIST_JSON }
+        : { stdout: SECRET_DELETE_STDOUT },
+    );
+    const out = await workersCommand([
+      "secret",
+      "delete",
+      "WEBHOOK_SECRET",
+      "--name",
+      WORKER,
+    ]);
+    expect(calls.map((c) => c.args)).toEqual([
+      ["secret", "list", "--format", "json", "--name", WORKER],
+      ["secret", "delete", "WEBHOOK_SECRET", "--name", WORKER],
+    ]);
+    expect(out).toContain("secret: WEBHOOK_SECRET");
+    expect(out).toContain("status: deleted");
+    expect(out).toContain("secrets_left: 1");
+    expect(out).toContain(`workers secret list --name ${WORKER}`);
+  });
+
+  it("is NOT_FOUND for a secret that does not match exactly, with nothing deleted", async () => {
+    const calls = fakeWrangler(() => ({ stdout: SECRET_LIST_JSON }));
+    const err = await failure(
+      workersCommand(["secret", "delete", "webhook_secret", "--name", WORKER]),
+    );
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.message).toBe(
+      `secret webhook_secret not found on Worker ${WORKER}; nothing deleted`,
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("is NOT_FOUND for an unknown Worker and never reaches the delete", async () => {
+    const calls = fakeWrangler(() => ({
+      stderr: MISSING_WORKER_STDERR,
+      exitCode: 1,
+    }));
+    const err = await failure(
+      workersCommand([
+        "secret",
+        "delete",
+        "API_KEY",
+        "--name",
+        "family-haze-bto",
+      ]),
+    );
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.message).toContain("nothing deleted");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("requires KEY and --name, and never echoes stray input", async () => {
+    const calls = fakeWrangler(() => ({}));
+    expect(
+      (await failure(workersCommand(["secret", "delete", "--name", WORKER])))
+        .message,
+    ).toBe("secret name <KEY> is required");
+    expect(
+      (await failure(workersCommand(["secret", "delete", "API_KEY"]))).message,
+    ).toBe("--name is required");
+    const stray = await failure(
+      workersCommand(["secret", "delete", "API_KEY", SECRET, "--name", WORKER]),
+    );
+    expect(stray.code).toBe("VALIDATION_ERROR");
+    expect(stray.message).not.toContain(SECRET);
+    const kv = await failure(
+      workersCommand([
+        "secret",
+        "delete",
+        `API_KEY=${SECRET}`,
+        "--name",
+        WORKER,
+      ]),
+    );
+    expect(kv.message).not.toContain(SECRET);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is UNKNOWN when wrangler does not confirm the delete", async () => {
+    fakeWrangler((args) =>
+      args[1] === "list" ? { stdout: SECRET_LIST_JSON } : { stdout: "" },
+    );
+    const err = await failure(
+      workersCommand(["secret", "delete", "WEBHOOK_SECRET", "--name", WORKER]),
+    );
+    expect(err.code).toBe("UNKNOWN");
+  });
+
+  it("lists delete among the secret subcommands", async () => {
+    const err = await failure(workersCommand(["secret", "rotate"]));
+    expect(err.suggestions).toContain("subcommands: put, list, delete");
   });
 });

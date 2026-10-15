@@ -12,7 +12,7 @@ reference implementation [`gh-axi`](https://github.com/kunchenguid/gh-axi).
 
 Early scaffold (v0). Read commands, plus write commands on Pages
 (`pages create`, `pages deploy`), Workers (`workers deploy`,
-`workers secret put`), Workers KV (`kv create`, `kv drop`, `kv put`,
+`workers delete`, `workers secret put`, `workers secret delete`), Workers KV (`kv create`, `kv drop`, `kv put`,
 `kv delete`) and
 Email Routing. Writes are explicit verbs that name their
 target in full and print what changed; nothing is inferred from context.
@@ -60,6 +60,8 @@ cloudflare-axi workers deploy --dry-run              # bundle the Worker in cwd 
 cloudflare-axi workers deploy --name <worker>        # real deploy; --name must match the config's Worker
 cloudflare-axi workers secret list [--name <worker>] # secret names and types (never values)
 printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name <worker>   # value on stdin only
+cloudflare-axi workers secret delete <KEY> --name <worker>  # exact name; NOT_FOUND deletes nothing
+cloudflare-axi workers delete --name <worker>        # irreversible; refuses a Worker others depend on unless --force
 cloudflare-axi pages        # all Pages projects in your account
 cloudflare-axi pages create <name> [--production-branch main]
 cloudflare-axi pages deploy <dir> --project <name> [--branch main]   # default branch main = production
