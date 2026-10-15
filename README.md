@@ -12,7 +12,8 @@ reference implementation [`gh-axi`](https://github.com/kunchenguid/gh-axi).
 
 Early scaffold (v0). Read commands, plus write commands on Pages
 (`pages create`, `pages deploy`), Workers (`workers deploy`,
-`workers secret put`), Workers KV (`kv create`, `kv put`, `kv delete`) and
+`workers secret put`), Workers KV (`kv create`, `kv drop`, `kv put`,
+`kv delete`) and
 Email Routing. Writes are explicit verbs that name their
 target in full and print what changed; nothing is inferred from context.
 
@@ -70,6 +71,7 @@ cloudflare-axi kv get feed --namespace SETTINGS         # value (JSON pretty-pri
 cloudflare-axi kv get --key -feed --namespace SETTINGS  # --key for a key starting with - (put/delete refuse such keys)
 cloudflare-axi kv put feed --namespace SETTINGS --file ./feed.json [--ttl 3600]   # or pipe it in with --stdin
 cloudflare-axi kv delete feed --namespace SETTINGS      # refuses a key that does not exist
+cloudflare-axi kv drop SETTINGS                         # delete the whole namespace (title or id); prints the key count it held
 cloudflare-axi whoami       # logged-in Cloudflare account
 cloudflare-axi email --zone example.com            # Email Routing status, destinations, rules
 cloudflare-axi email dns --zone example.com        # MX/SPF/DKIM Cloudflare expects vs live DNS

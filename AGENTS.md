@@ -133,8 +133,14 @@ the upstream `kunchenguid/axi` repo).
   `--ttl 60` created with the TTL (`--ttl 30` and a missing file gave
   `VALIDATION_ERROR`); `kv delete` deleted and a rerun gave `NOT_FOUND`.
   `kv get` / `kv keys --binding` worked from a project dir, an unknown
-  binding gave `NOT_LINKED` and `kv put --binding` was refused. There is no
-  axi command to delete a namespace yet (#46).
+  binding gave `NOT_LINKED` and `kv put --binding` was refused.
+- `wrangler kv namespace delete` (4.127.1 source) takes exactly one of a
+  positional title, `--binding` or `--namespace-id`, prints "About to
+  delete ..." and asks "Ok to proceed?" unless `--skip-confirmation` / `-y`
+  (also present in 4.103). `kv drop` resolves the title or id itself
+  (exact match, NOT_FOUND before any write), counts keys over REST (one
+  1000-key page; more reports "1000+"), then runs it with `--namespace-id`
+  and `--skip-confirmation`. Not yet smoke-tested live.
 - `wrangler pages deployment list --project-name <n> --json` has the same
   display-key quirk, and its `Status` field is a pre-rendered relative time
   ("1 day ago"), not a status. Newest first. Missing project → "Project not
@@ -213,9 +219,8 @@ the upstream `kunchenguid/axi` repo).
   command to delete a Worker or a single secret yet (#47), so use raw
   `wrangler delete <worker>` or
   `wrangler secret delete <KEY> --name <worker>` under
-  `AXI_GAP=simkimsia/cloudflare-axi#47`, and
-  `wrangler kv namespace delete --namespace-id <id>` under
-  `AXI_GAP=simkimsia/cloudflare-axi#46`. Never smoke a real deploy or put
+  `AXI_GAP=simkimsia/cloudflare-axi#47`. Drop a throwaway KV namespace with
+  `cloudflare-axi kv drop <title>`. Never smoke a real deploy or put
   against a real Worker.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.

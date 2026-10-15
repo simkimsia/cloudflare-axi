@@ -785,6 +785,99 @@ describe("kv delete", () => {
   });
 });
 
+describe("kv drop", () => {
+  const DROP_ARGV = [
+    "kv",
+    "namespace",
+    "delete",
+    "--namespace-id",
+    SETTINGS_ID,
+    "--skip-confirmation",
+  ];
+
+  it("drops a namespace by title, counting its keys first", async () => {
+    apiKeys = [{ name: "a" }, { name: "b" }, { name: "c" }];
+    const out = await kvCommand(["drop", "SETTINGS"]);
+    expect(apiCalls).toEqual([`${NS_PATH}/keys?limit=1000`]);
+    expect(calls).toEqual([["kv", "namespace", "list"], DROP_ARGV]);
+    expect(out).toContain("title: SETTINGS");
+    expect(out).toContain(`id: ${SETTINGS_ID}`);
+    expect(out).toContain("keys: 3");
+    expect(out).toContain("status: deleted");
+    expect(out).toContain(`kv_namespaces entry with id = "${SETTINGS_ID}"`);
+  });
+
+  it("drops by id with --namespace and says when it held more keys than it counted", async () => {
+    apiKeys = Array.from({ length: 1001 }, (_, i) => ({
+      name: `k${String(i).padStart(4, "0")}`,
+    }));
+    const out = await kvCommand(["drop", "--namespace", SETTINGS_ID]);
+    expect(apiCalls).toHaveLength(1);
+    expect(calls.at(-1)).toEqual(DROP_ARGV);
+    expect(out).toContain("keys: 1000+");
+  });
+
+  it("reports an unknown namespace as NOT_FOUND and deletes nothing", async () => {
+    await expectError(
+      kvCommand(["drop", "SETTING"]),
+      "NOT_FOUND",
+      /SETTING not found.*nothing deleted/,
+    );
+    expect(apiCalls).toEqual([]);
+    expect(calls.some((c) => c[2] === "delete")).toBe(false);
+  });
+
+  it("maps a namespace deleted after resolving (code 10013) to NOT_FOUND", async () => {
+    replies["kv namespace delete"] = {
+      code: 1,
+      stderr: ERR(
+        "A request to the Cloudflare API (/accounts/acc/storage/kv/namespaces/x) failed.\n  get namespace: 'namespace not found' [code: 10013]",
+      ),
+    };
+    await expectError(kvCommand(["drop", "SETTINGS"]), "NOT_FOUND");
+  });
+
+  it("needs the namespace named in full, exactly once, before any call", async () => {
+    await expectError(
+      kvCommand(["drop"]),
+      "VALIDATION_ERROR",
+      /namespace title or id is required/,
+    );
+    await expectError(
+      kvCommand(["drop", "--binding", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /not accepted for writes/,
+    );
+    await expectError(
+      kvCommand(["drop", "SETTINGS", "--namespace", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /pass the namespace once/,
+    );
+    await expectError(
+      kvCommand(["drop", "SETTINGS", "extra"]),
+      "VALIDATION_ERROR",
+      /unexpected argument extra/,
+    );
+    await expectError(
+      kvCommand(["drop", "SETTINGS", "--yes"]),
+      "VALIDATION_ERROR",
+      /unknown flag --yes/,
+    );
+    expect(calls).toEqual([]);
+    expect(apiCalls).toEqual([]);
+  });
+
+  it("is listed when a namespace subcommand is guessed", async () => {
+    const error = await expectError(
+      kvCommand(["namespace", "delete", "SETTINGS"]),
+      "VALIDATION_ERROR",
+      /unknown subcommand namespace/,
+    );
+    expect(error.suggestions[0]).toContain("drop");
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("kv dot-segment keys", () => {
   for (const key of [".", ".."]) {
     for (const argv of [

@@ -26,9 +26,9 @@ import {
 import { resolveAccountId } from "../zones.js";
 
 export const KV_HELP = `usage: cloudflare-axi kv [subcommand] [flags]
-Workers KV: list namespaces, create one, list keys, read, write and delete values. Always the remote (deployed) store, never wrangler's local one.
-subcommands[5]:
-  (none)=list all namespaces (title, id), create <title>, keys [<namespace>], get <key>, put <key>, delete <key>
+Workers KV: list namespaces, create or drop one, list keys, read, write and delete values. Always the remote (deployed) store, never wrangler's local one.
+subcommands[6]:
+  (none)=list all namespaces (title, id), create <title>, drop <title|id>, keys [<namespace>], get <key>, put <key>, delete <key>
 flags{keys,get}:
   --namespace <title|id> or --binding <NAME> (from the wrangler config in cwd)
 flags{get,put,delete}:
@@ -41,8 +41,11 @@ flags{put}:
   --namespace <title|id> (required), --file <path> or --stdin (exactly one; the value never goes in argv), --ttl <seconds>
 flags{delete}:
   --namespace <title|id> (required)
+flags{drop}:
+  --namespace <title|id> instead of the positional (exactly one)
 notes:
   put and delete need --namespace named in full (title or id); --binding is refused for writes because it depends on the cwd's wrangler config
+  drop deletes a whole namespace and every key in it, irreversibly; it needs the namespace named in full (title or id) and refuses --binding
   a key starting with - can be read with --namespace, but put, delete and get --binding refuse it (wrangler reads it as a flag); likewise keys --binding refuses a --prefix starting with -
   put prints whether it created the key or overwrote an existing value; delete refuses a key that does not exist
   KV is eventually consistent: a read can lag a write by up to 60s
@@ -56,10 +59,12 @@ examples:
   echo '{"on":true}' | cloudflare-axi kv put flags --namespace SETTINGS --stdin
   cloudflare-axi kv put feed --namespace SETTINGS --file ./feed.json --ttl 3600
   cloudflare-axi kv delete feed --namespace SETTINGS
+  cloudflare-axi kv drop SETTINGS
 `;
 
 const USAGE = {
   create: "cloudflare-axi kv create <title>",
+  drop: "cloudflare-axi kv drop <title|id> | --namespace <title|id>",
   keys: "cloudflare-axi kv keys <namespace> | --binding <NAME> [--prefix <p>] [--limit <n>]",
   get: "cloudflare-axi kv get <key> | --key <name> --namespace <title|id> | --binding <NAME> [--full]",
   put: "cloudflare-axi kv put <key> | --key <name> --namespace <title|id> --file <path> | --stdin [--ttl <seconds>]",
@@ -397,6 +402,79 @@ async function createNamespace(args: string[]): Promise<string> {
       `wrangler.toml: add a [[kv_namespaces]] table with binding = "${binding}" and id = "${shownId}"`,
       `wrangler.jsonc: add { "binding": "${binding}", "id": "${shownId}" } to "kv_namespaces"`,
       `Run \`cloudflare-axi kv put <key> --namespace ${title} --file <path>\` to write a value`,
+    ]),
+  ]);
+}
+
+// ---- drop ----
+
+/** How many keys `drop` counts before it reports "N+" (one REST page). */
+export const DROP_KEY_COUNT_CAP = API_KEYS_PAGE_MAX;
+
+async function dropNamespace(args: string[]): Promise<string> {
+  const namespaceFlag = takeFlag(args, "--namespace");
+  const binding = takeFlag(args, "--binding");
+  const positional = takePositional(args);
+  rejectExtraArgs("kv drop", args, USAGE.drop);
+  if (namespaceFlag !== undefined && positional !== undefined) {
+    throw new AxiError(
+      "pass the namespace once, either positionally or with --namespace",
+      "VALIDATION_ERROR",
+      [USAGE.drop],
+    );
+  }
+  if (namespaceFlag === undefined && positional === undefined && !binding) {
+    throw new AxiError(
+      "namespace title or id is required",
+      "VALIDATION_ERROR",
+      [USAGE.drop, "Run `cloudflare-axi kv` to list namespaces (title, id)"],
+    );
+  }
+  let target: NamespaceTarget;
+  try {
+    target = await writeTarget(
+      namespaceFlag ?? positional,
+      binding,
+      "drop",
+      USAGE.drop,
+    );
+  } catch (error) {
+    if (error instanceof AxiError && error.code === "NOT_FOUND") {
+      throw new AxiError(
+        `${error.message}; nothing deleted`,
+        "NOT_FOUND",
+        error.suggestions,
+      );
+    }
+    throw error;
+  }
+
+  // Count before deleting so the output says what was lost. One bounded REST
+  // page: a namespace with more keys reports "N+" rather than paging forever.
+  const { keys, more } = await listNamespaceKeys(
+    target,
+    undefined,
+    DROP_KEY_COUNT_CAP,
+  );
+  // --namespace-id: the id was resolved by exact match above, so wrangler
+  // never re-resolves a title. --skip-confirmation: never wait on a prompt.
+  await wranglerExec([
+    "kv",
+    "namespace",
+    "delete",
+    "--namespace-id",
+    target.id,
+    "--skip-confirmation",
+  ]);
+  return renderOutput([
+    encode({
+      namespace: { title: target.title, id: target.id },
+      keys: more ? `${keys.length}+` : keys.length,
+      status: "deleted",
+    }),
+    renderHelp([
+      `Remove the kv_namespaces entry with id = "${target.id}" ([[kv_namespaces]] in wrangler.toml, "kv_namespaces" in wrangler.jsonc) from any wrangler config that binds it, or its next deploy fails`,
+      "Run `cloudflare-axi kv` to confirm it is gone (listings can lag up to 60s)",
     ]),
   ]);
 }
@@ -900,7 +978,7 @@ async function deleteKey(args: string[]): Promise<string> {
 
 // ---- dispatch ----
 
-const SUBCOMMANDS = ["create", "keys", "get", "put", "delete"] as const;
+const SUBCOMMANDS = ["create", "drop", "keys", "get", "put", "delete"] as const;
 
 export async function kvCommand(args: string[]): Promise<string> {
   const rest = [...args];
@@ -914,6 +992,11 @@ export async function kvCommand(args: string[]): Promise<string> {
       "VALIDATION_ERROR",
       [
         `subcommands: ${SUBCOMMANDS.join(", ")} (or none to list namespaces)`,
+        ...(first === "namespace"
+          ? [
+              "Namespaces: `cloudflare-axi kv` lists them, `kv create <title>` creates one, `kv drop <title|id>` deletes one",
+            ]
+          : []),
         "cloudflare-axi kv --help",
       ],
     );
@@ -922,6 +1005,8 @@ export async function kvCommand(args: string[]): Promise<string> {
   switch (first as (typeof SUBCOMMANDS)[number]) {
     case "create":
       return createNamespace(rest);
+    case "drop":
+      return dropNamespace(rest);
     case "keys":
       return listKeys(rest);
     case "get":
