@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.3](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.2...cloudflare-axi-v0.2.3) (2026-10-15)
+
+
+### Features
+
+* AXI_DEBUG=1 prints forwarded wrangler argv and REST calls to stderr ([75ff20c](https://github.com/simkimsia/cloudflare-axi/commit/75ff20ca623798da2839a85268dc11bfb8f5d8a4)), closes [#31](https://github.com/simkimsia/cloudflare-axi/issues/31)
+* global --config for directory-scoped commands ([d8d158a](https://github.com/simkimsia/cloudflare-axi/commit/d8d158ab64081331809c758fb3e93df79b56123e)), closes [#38](https://github.com/simkimsia/cloudflare-axi/issues/38)
+* kv create, keys, get, put and delete ([c14657a](https://github.com/simkimsia/cloudflare-axi/commit/c14657a7787949b6d5390c2cd7f74e868b3f51c1)), closes [#35](https://github.com/simkimsia/cloudflare-axi/issues/35) [#36](https://github.com/simkimsia/cloudflare-axi/issues/36)
+* **kv:** add kv drop to delete a KV namespace ([efaf0ae](https://github.com/simkimsia/cloudflare-axi/commit/efaf0aee3c7ac4c4d86bfab5b5c71d37c503e691)), closes [#46](https://github.com/simkimsia/cloudflare-axi/issues/46)
+* workers deploy and secret put/list ([#34](https://github.com/simkimsia/cloudflare-axi/issues/34)) ([64d363f](https://github.com/simkimsia/cloudflare-axi/commit/64d363fd357b51c59de3e2b46e3af2efb4ebc027))
+
+
+### Bug Fixes
+
+* address workers review findings ([e54193a](https://github.com/simkimsia/cloudflare-axi/commit/e54193ab3776e1b57deace4c0084eb9565a426b3)), closes [#34](https://github.com/simkimsia/cloudflare-axi/issues/34)
+* **kv:** bounded listings, byte-exact reads, --key, binding 404 hints ([aef9de3](https://github.com/simkimsia/cloudflare-axi/commit/aef9de33036884546315c595309b330322f63618)), closes [#36](https://github.com/simkimsia/cloudflare-axi/issues/36)
+* **kv:** count drop's keys with exactly one REST request ([de9c1d4](https://github.com/simkimsia/cloudflare-axi/commit/de9c1d47d668379179518c9373aed6add9c7bb4b)), closes [#46](https://github.com/simkimsia/cloudflare-axi/issues/46)
+* run raw wrangler hints from the config's directory ([5934d8c](https://github.com/simkimsia/cloudflare-axi/commit/5934d8c6ee8dd41cbe0682ad32271fb48ae6c9b1)), closes [#38](https://github.com/simkimsia/cloudflare-axi/issues/38)
+* **workers:** map a missing [assets] directory to VALIDATION_ERROR ([0e57091](https://github.com/simkimsia/cloudflare-axi/commit/0e570917d24a2d91926fd09ac6b3d33648779099)), closes [#44](https://github.com/simkimsia/cloudflare-axi/issues/44)
+* **workers:** map a missing main entry-point file to VALIDATION_ERROR ([d7cab4a](https://github.com/simkimsia/cloudflare-axi/commit/d7cab4adea7485ef5693d34c53773a141d44495d)), closes [#43](https://github.com/simkimsia/cloudflare-axi/issues/43)
+* **workers:** report unknown deploy targets, carry --config into hints, name missing entry point ([2b2d65a](https://github.com/simkimsia/cloudflare-axi/commit/2b2d65a73532ab676988aa80e46ba95b8fc951b8)), closes [#34](https://github.com/simkimsia/cloudflare-axi/issues/34)
+
 ## [0.2.2](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.1...cloudflare-axi-v0.2.2) (2026-10-04)
 
 
