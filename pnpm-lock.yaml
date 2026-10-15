@@ -13,6 +13,9 @@ importers:
       axi-sdk-js:
         specifier: ^0.1.11
         version: 0.1.11
+      smol-toml:
+        specifier: ^1.9.0
+        version: 1.9.0
     devDependencies:
       "@types/node":
         specifier: ^22.0.0
@@ -762,6 +765,13 @@ packages:
         integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==,
       }
 
+  smol-toml@1.9.0:
+    resolution:
+      {
+        integrity: sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ==,
+      }
+    engines: { node: ">= 18" }
+
   source-map-js@1.2.1:
     resolution:
       {
@@ -1284,6 +1294,8 @@ snapshots:
       fsevents: 2.3.3
 
   siginfo@2.0.0: {}
+
+  smol-toml@1.9.0: {}
 
   source-map-js@1.2.1: {}
 

@@ -1358,6 +1358,30 @@ describe("workers delete account resolution", () => {
     expect(paths).toEqual(dependentPaths("cfgacc"));
   });
 
+  it.each([
+    ['"account_id" = "quoted"', "quoted"],
+    ["'account_id' = 'quoted'", "quoted"],
+    ['account_id = """multi"""', "multi"],
+  ])("reads a TOML account_id written as %s", async (line, account) => {
+    writeFileSync(config, `name = "x"\n${line}\n`);
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER, "--config", config]);
+    expect(paths).toEqual(dependentPaths(account));
+  });
+
+  it("refuses an unparseable TOML config before any delete", async () => {
+    writeFileSync(config, 'name = "x"\naccount_id = \n');
+    const paths = stubApi();
+    const calls = deleteCalls();
+    const err = await failure(
+      workersCommand(["delete", "--name", WORKER, "--config", config]),
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(paths).toEqual([]);
+    expect(calls.map((c) => c.args[0])).toEqual(["secret"]);
+  });
+
   it("reads account_id from a JSONC config with comments and trailing commas", async () => {
     const jsonc = join(dir, "wrangler.jsonc");
     writeFileSync(

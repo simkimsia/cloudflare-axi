@@ -221,7 +221,8 @@ the upstream `kunchenguid/axi` repo).
   `GET /accounts/{a}/workers/scripts/{name}/references` and
   `.../workers/tails/by-consumer/{name}` (`listDependents`) in the account
   wrangler deletes from (`configAccountId`: the `--config` or find-up
-  config's top-level `account_id`, which wrangler prefers, then
+  config's top-level `account_id`, read with a real TOML parser
+  (`smol-toml`) or as JSONC, which wrangler prefers, then
   `CLOUDFLARE_ACCOUNT_ID`, then the token's sole account), refuses when
   anything depends on the Worker unless `--force`, then always runs
   `wrangler delete --name <n> --force`. Success line: "Successfully deleted

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { takeFlag } from "./args.js";
 import { AxiError } from "./errors.js";
 import type { RunOptions } from "./wrangler.js";
@@ -178,18 +179,13 @@ function stripJsonc(text: string): string {
  */
 export function configAccountId(path: string): string | undefined {
   const text = readFileSync(path, "utf8");
-  if (path.endsWith(".toml")) {
-    for (const line of text.split("\n")) {
-      if (/^\s*\[/.test(line)) return undefined;
-      const match =
-        /^\s*account_id\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
-      if (match) return (match[1] ?? match[2]).trim() || undefined;
-    }
-    return undefined;
-  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripJsonc(text));
+    // A real TOML parser, so quoted keys ("account_id" = ...), literal
+    // strings and inline comments all read the way wrangler reads them.
+    parsed = path.endsWith(".toml")
+      ? parseToml(text)
+      : JSON.parse(stripJsonc(text));
   } catch {
     throw new AxiError(
       `Could not parse ${path} to read its account_id`,
