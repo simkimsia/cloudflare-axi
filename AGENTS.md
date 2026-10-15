@@ -138,8 +138,9 @@ the upstream `kunchenguid/axi` repo).
   positional title, `--binding` or `--namespace-id`, prints "About to
   delete ..." and asks "Ok to proceed?" unless `--skip-confirmation` / `-y`
   (also present in 4.103). `kv drop` resolves the title or id itself
-  (exact match, NOT_FOUND before any write), counts keys over REST (one
-  1000-key page; more reports "1000+"), then runs it with `--namespace-id`
+  (exact match, NOT_FOUND before any write), counts keys with one REST
+  request (limit 1000, never a cursor walk; a returned cursor makes it
+  "N+"), then runs it with `--namespace-id`
   and `--skip-confirmation`. Not yet smoke-tested live.
 - `wrangler pages deployment list --project-name <n> --json` has the same
   display-key quirk, and its `Status` field is a pre-rendered relative time

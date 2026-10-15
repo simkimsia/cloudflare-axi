@@ -449,13 +449,14 @@ async function dropNamespace(args: string[]): Promise<string> {
     throw error;
   }
 
-  // Count before deleting so the output says what was lost. One bounded REST
-  // page: a namespace with more keys reports "N+" rather than paging forever.
-  const { keys, more } = await listNamespaceKeys(
-    target,
-    undefined,
-    DROP_KEY_COUNT_CAP,
+  // Count before deleting so the output says what was lost. Exactly one REST
+  // request, never a cursor walk: a non-empty cursor (a full page, or a
+  // short one) means more keys exist, so the count reads "N+".
+  const page = await cfGetPage<KvKey[]>(
+    `${await namespacePath(target)}/keys?limit=${DROP_KEY_COUNT_CAP}`,
   );
+  const counted = page.result.length;
+  const more = Boolean(page.info.cursor);
   // --namespace-id: the id was resolved by exact match above, so wrangler
   // never re-resolves a title. --skip-confirmation: never wait on a prompt.
   await wranglerExec([
@@ -469,7 +470,7 @@ async function dropNamespace(args: string[]): Promise<string> {
   return renderOutput([
     encode({
       namespace: { title: target.title, id: target.id },
-      keys: more ? `${keys.length}+` : keys.length,
+      keys: more ? `${counted}+` : counted,
       status: "deleted",
     }),
     renderHelp([

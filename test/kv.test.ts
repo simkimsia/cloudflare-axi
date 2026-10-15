@@ -817,6 +817,26 @@ describe("kv drop", () => {
     expect(out).toContain("keys: 1000+");
   });
 
+  it("counts with exactly one request, even when a short page carries a cursor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        apiCalls.push(url.replace("https://api.cloudflare.com/client/v4", ""));
+        return envelope(200, {
+          result: [{ name: "a" }, { name: "b" }],
+          errors: [],
+          messages: [],
+          success: true,
+          result_info: { count: 2, cursor: "next" },
+        });
+      }),
+    );
+    const out = await kvCommand(["drop", "SETTINGS"]);
+    expect(apiCalls).toEqual([`${NS_PATH}/keys?limit=1000`]);
+    expect(calls.at(-1)).toEqual(DROP_ARGV);
+    expect(out).toContain("keys: 2+");
+  });
+
   it("reports an unknown namespace as NOT_FOUND and deletes nothing", async () => {
     await expectError(
       kvCommand(["drop", "SETTING"]),
@@ -873,7 +893,9 @@ describe("kv drop", () => {
       "VALIDATION_ERROR",
       /unknown subcommand namespace/,
     );
-    expect(error.suggestions[0]).toContain("drop");
+    expect(error.suggestions).toContain(
+      "Namespaces: `cloudflare-axi kv` lists them, `kv create <title>` creates one, `kv drop <title|id>` deletes one",
+    );
     expect(calls).toEqual([]);
   });
 });
