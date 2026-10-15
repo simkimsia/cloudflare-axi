@@ -1144,6 +1144,8 @@ function stubApi(references: unknown = NO_REFERENCES, tails: unknown = []) {
       paths.push(path);
       if (path.endsWith("/references")) return ok(references);
       if (path.includes("/tails/by-consumer/")) return ok(tails);
+      if (path.startsWith("/accounts?"))
+        return ok([{ id: "solo", name: "Solo" }]);
       return new Response("{}", { status: 404 });
     }),
   );
@@ -1327,6 +1329,96 @@ describe("workers delete", () => {
     ]);
     expect(calls[1].cwd).toBe(dir);
     expect(out).toContain(`--name ${WORKER} --config ${shellQuote(config)}`);
+  });
+});
+
+describe("workers delete account resolution", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const deleteCalls = () =>
+    fakeWrangler((args) =>
+      args[0] === "secret" ? { stdout: "[]" } : { stdout: DELETE_STDOUT },
+    );
+  const dependentPaths = (account: string) => [
+    `/accounts/${account}/workers/scripts/${WORKER}/references`,
+    `/accounts/${account}/workers/tails/by-consumer/${WORKER}`,
+  ];
+
+  it("uses the --config account_id over CLOUDFLARE_ACCOUNT_ID, like wrangler", async () => {
+    writeFileSync(
+      config,
+      'name = "x"\naccount_id = "cfgacc" # pinned\n\n[env.staging]\naccount_id = "stage"\n',
+    );
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER, "--config", config]);
+    expect(paths).toEqual(dependentPaths("cfgacc"));
+  });
+
+  it("reads account_id from a JSONC config with comments and trailing commas", async () => {
+    const jsonc = join(dir, "wrangler.jsonc");
+    writeFileSync(
+      jsonc,
+      '{\n  // the Worker\n  "name": "x", /* "account_id": "no" */\n  "main": "src//index.ts",\n  "account_id": "jsonacc",\n}\n',
+    );
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER, "--config", jsonc]);
+    expect(paths).toEqual(dependentPaths("jsonacc"));
+  });
+
+  it("finds the cwd config's account_id when no --config is given", async () => {
+    writeFileSync(config, 'name = "x"\naccount_id = "cwdacc"\n');
+    const nested = join(dir, "src");
+    mkdirSync(nested);
+    vi.spyOn(process, "cwd").mockReturnValue(nested);
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER]);
+    expect(paths).toEqual(dependentPaths("cwdacc"));
+  });
+
+  it("falls back to CLOUDFLARE_ACCOUNT_ID when the config has no account_id", async () => {
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER, "--config", config]);
+    expect(paths).toEqual(dependentPaths("acc"));
+  });
+
+  it("with no config at all, uses CLOUDFLARE_ACCOUNT_ID, else the token's sole account", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/");
+    const paths = stubApi();
+    deleteCalls();
+    await workersCommand(["delete", "--name", WORKER]);
+    expect(paths).toEqual(dependentPaths("acc"));
+
+    paths.length = 0;
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "");
+    await workersCommand(["delete", "--name", WORKER]);
+    expect(paths).toEqual(["/accounts?per_page=50", ...dependentPaths("solo")]);
+  });
+
+  it("refuses with nothing deleted when several accounts are visible and none is pinned", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/");
+    stubApi();
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok([
+          { id: "a1", name: "One" },
+          { id: "a2", name: "Two" },
+        ]),
+      ),
+    );
+    const calls = deleteCalls();
+    const err = await failure(workersCommand(["delete", "--name", WORKER]));
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("nothing deleted");
+    expect(calls.map((c) => c.args[0])).toEqual(["secret"]);
   });
 });
 

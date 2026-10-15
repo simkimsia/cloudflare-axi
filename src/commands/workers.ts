@@ -7,6 +7,7 @@ import {
   takePositional,
 } from "../args.js";
 import {
+  configAccountId,
   configArgs,
   configRunOptions,
   configSource,
@@ -624,14 +625,21 @@ export function parseDeletedSiteNamespaces(stdout: string): string[] {
   ].map((m) => m[1]);
 }
 
-/** Account for the dependents check (CLOUDFLARE_ACCOUNT_ID, else the token's sole account). */
-async function workersAccountId(): Promise<string> {
+/**
+ * Account for the dependents check, resolved the way wrangler resolves the
+ * one it deletes from: the applicable config's account_id, else
+ * CLOUDFLARE_ACCOUNT_ID, else the token's sole account.
+ */
+async function workersAccountId(config: string | undefined): Promise<string> {
+  const path = config ?? findWranglerConfig(process.cwd());
+  const fromConfig = path === undefined ? undefined : configAccountId(path);
+  if (fromConfig) return fromConfig;
   try {
     return await resolveAccountId();
   } catch (error) {
     if (error instanceof AxiError && error.code === "VALIDATION_ERROR") {
       throw new AxiError(`${error.message}; nothing deleted`, error.code, [
-        "Set CLOUDFLARE_ACCOUNT_ID=<id> to the account that owns the Worker",
+        "Set account_id in the wrangler config, or CLOUDFLARE_ACCOUNT_ID=<id>, to the account that owns the Worker",
       ]);
     }
     throw error;
@@ -695,7 +703,7 @@ async function runDeleteWorker(
   // break dependents silently either way. Make that check here (the same two
   // endpoints wrangler reads), then always pass --force so it never prompts.
   if (!force) {
-    const account = await workersAccountId();
+    const account = await workersAccountId(config);
     const encoded = encodeURIComponent(name);
     let references: WorkerReferences | null;
     let tails: TailProducer[] | null;

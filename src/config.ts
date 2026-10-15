@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { takeFlag } from "./args.js";
 import { AxiError } from "./errors.js";
@@ -143,4 +143,62 @@ export async function withConfigContext<T>(
     }
     throw error;
   }
+}
+
+/** Drop `//` and `/* *\/` comments and trailing commas from JSONC, leaving strings intact. */
+function stripJsonc(text: string): string {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      const end = /"(?:[^"\\]|\\.)*"/y;
+      end.lastIndex = i;
+      const match = end.exec(text);
+      const str = match ? match[0] : text.slice(i);
+      out += str;
+      i += str.length - 1;
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      i = close === -1 ? text.length : close + 1;
+    } else {
+      out += c;
+    }
+  }
+  return out.replace(/,(\s*[}\]])/g, "$1");
+}
+
+/**
+ * Top-level `account_id` of a wrangler config (TOML, JSON or JSONC), or
+ * undefined when it sets none. wrangler gives this precedence over
+ * CLOUDFLARE_ACCOUNT_ID, so REST calls that must hit the same account as a
+ * wrangler run read it first. An unreadable config is a VALIDATION_ERROR.
+ */
+export function configAccountId(path: string): string | undefined {
+  const text = readFileSync(path, "utf8");
+  if (path.endsWith(".toml")) {
+    for (const line of text.split("\n")) {
+      if (/^\s*\[/.test(line)) return undefined;
+      const match =
+        /^\s*account_id\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
+      if (match) return (match[1] ?? match[2]).trim() || undefined;
+    }
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonc(text));
+  } catch {
+    throw new AxiError(
+      `Could not parse ${path} to read its account_id`,
+      "VALIDATION_ERROR",
+      ["Fix the wrangler config, or pass `--config <path>` to a valid one"],
+    );
+  }
+  const account = (parsed as { account_id?: unknown } | null)?.account_id;
+  return typeof account === "string" && account.trim()
+    ? account.trim()
+    : undefined;
 }

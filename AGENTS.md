@@ -219,7 +219,10 @@ the upstream `kunchenguid/axi` repo).
   dependents silently too. `workers delete` therefore reads the same two
   endpoints wrangler does,
   `GET /accounts/{a}/workers/scripts/{name}/references` and
-  `.../workers/tails/by-consumer/{name}` (`listDependents`), refuses when
+  `.../workers/tails/by-consumer/{name}` (`listDependents`) in the account
+  wrangler deletes from (`configAccountId`: the `--config` or find-up
+  config's top-level `account_id`, which wrangler prefers, then
+  `CLOUDFLARE_ACCOUNT_ID`, then the token's sole account), refuses when
   anything depends on the Worker unless `--force`, then always runs
   `wrangler delete --name <n> --force`. Success line: "Successfully deleted
   <name>"; it also deletes Workers Sites asset namespaces ('Deleted asset
