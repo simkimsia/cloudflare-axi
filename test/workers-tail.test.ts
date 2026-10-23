@@ -262,20 +262,21 @@ describe("workers tail", () => {
   });
 
   it("redacts a bot token in the request path", async () => {
+    const fakeTelegramToken = `123456789:${"A".repeat(35)}`;
     const event = {
       ...FETCH_EVENT,
       event: {
         ...FETCH_EVENT.event,
         request: {
           ...FETCH_EVENT.event.request,
-          url: "https://family-haze-bot.x.workers.dev/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ",
+          url: `https://family-haze-bot.x.workers.dev/bot${fakeTelegramToken}`,
         },
       },
     };
     fakeSpawn({ chunks: [json(event)] });
     const out = await run(["--name", "family-haze-bot"]);
     expect(out).toContain("fetch POST /bot<redacted>");
-    expect(out).not.toContain("AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ");
+    expect(out).not.toContain(fakeTelegramToken.split(":")[1]);
   });
 
   it("keeps only cron events with --cron and counts the rest", async () => {
@@ -486,11 +487,10 @@ describe("tail helpers", () => {
   });
 
   it("keeps only the path of a URL", () => {
+    const fakeTelegramToken = `123456789:${"A".repeat(35)}`;
     expect(safePath("https://u:p@example.com/a/b?token=1#x")).toBe("/a/b?…");
     expect(safePath("https://example.com/")).toBe("/");
-    expect(
-      safePath("/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ?x=1"),
-    ).toBe("/bot<redacted>?…");
+    expect(safePath(`/bot${fakeTelegramToken}?x=1`)).toBe("/bot<redacted>?…");
   });
 
   it("describes non-fetch triggers like wrangler's pretty printer", () => {
