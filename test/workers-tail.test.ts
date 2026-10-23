@@ -586,9 +586,11 @@ describe("tail helpers", () => {
     expect(redactSecrets("api_key=XYZ password: pw1")).toBe(
       "api_key=<redacted> password: <redacted>",
     );
-    expect(
-      redactSecrets("bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ x"),
-    ).toBe("bot <redacted> x");
+    // Construct a synthetic token so source scanners do not flag a literal secret.
+    const fakeTelegramToken = `123456789:${"A".repeat(35)}`;
+    expect(redactSecrets(`bot ${fakeTelegramToken} x`)).toBe(
+      "bot <redacted> x",
+    );
   });
 
   it("keeps only the path of a URL", () => {
