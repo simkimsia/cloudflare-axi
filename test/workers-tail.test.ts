@@ -100,6 +100,8 @@ interface Script {
   stderr?: string;
   /** Exit by itself with this code after the chunks; omit to run until killed. */
   exit?: number;
+  /** stdout chunks flushed after SIGTERM, before exiting. */
+  afterTerm?: string[];
   /** Ignore SIGTERM (only SIGKILL ends it). */
   ignoreTerm?: boolean;
   enoent?: boolean;
@@ -128,6 +130,11 @@ function fakeSpawn(script: Script): SpawnCall[] {
       kill: (signal: string) => {
         call.kills.push(signal);
         if (signal === "SIGTERM" && script.ignoreTerm) return true;
+        if (signal === "SIGTERM") {
+          for (const chunk of script.afterTerm ?? []) {
+            child.stdout.emit("data", chunk);
+          }
+        }
         queueMicrotask(() =>
           child.emit(
             "close",
@@ -239,6 +246,38 @@ describe("workers tail", () => {
     expect(out).not.toContain("TypeError");
   });
 
+  it("reports the time limit when events flushed after it reach --max-events", async () => {
+    const calls = fakeSpawn({
+      afterTerm: [json(FETCH_EVENT), json(CRON_EVENT), json(ERROR_EVENT)],
+    });
+    const out = await run(
+      ["--name", "family-haze-bot", "--for", "5s", "--max-events", "2"],
+      5_000,
+    );
+    expect(calls[0].kills).toEqual(["SIGTERM"]);
+    expect(out).toContain("stopped: time limit");
+    expect(out).toContain("count: 2\n");
+    expect(out).not.toContain("Stopped at --max-events");
+    expect(out).not.toContain("TypeError");
+  });
+
+  it("redacts a bot token in the request path", async () => {
+    const event = {
+      ...FETCH_EVENT,
+      event: {
+        ...FETCH_EVENT.event,
+        request: {
+          ...FETCH_EVENT.event.request,
+          url: "https://family-haze-bot.x.workers.dev/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ",
+        },
+      },
+    };
+    fakeSpawn({ chunks: [json(event)] });
+    const out = await run(["--name", "family-haze-bot"]);
+    expect(out).toContain("fetch POST /bot<redacted>");
+    expect(out).not.toContain("AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ");
+  });
+
   it("keeps only cron events with --cron and counts the rest", async () => {
     fakeSpawn({
       chunks: [json(FETCH_EVENT), json(CRON_EVENT), json(ERROR_EVENT)],
@@ -257,6 +296,30 @@ describe("workers tail", () => {
     const out = await run(["--name", "family-haze-bot", "--cron"]);
     expect(out).toContain("events: 0 cron events");
     expect(out).toContain('a "*/5 * * * *" cron needs --for 6m');
+    expect(out).toContain("No cron event in the 1m tailed");
+  });
+
+  it("words the empty hint by the time actually tailed and the --status filter", async () => {
+    fakeSpawn({});
+    const promise = workersCommand([
+      "tail",
+      "--name",
+      "w",
+      "--for",
+      "6m",
+      "--status",
+      "error",
+    ]);
+    await vi.advanceTimersByTimeAsync(8_000);
+    process.emit("SIGINT");
+    await vi.advanceTimersByTimeAsync(0);
+    const out = await promise;
+    expect(out).toContain("stopped: interrupted");
+    expect(out).toContain(
+      "No invocations matching --status error in the 8s tailed",
+    );
+    expect(out).not.toContain("6m tailed");
+    expect(out).not.toContain("No invocations reached the Worker");
   });
 
   it("names the Worker from the events when --name is not given", async () => {
@@ -423,6 +486,9 @@ describe("tail helpers", () => {
   it("keeps only the path of a URL", () => {
     expect(safePath("https://u:p@example.com/a/b?token=1#x")).toBe("/a/b?…");
     expect(safePath("https://example.com/")).toBe("/");
+    expect(
+      safePath("/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ?x=1"),
+    ).toBe("/bot<redacted>?…");
   });
 
   it("describes non-fetch triggers like wrangler's pretty printer", () => {
