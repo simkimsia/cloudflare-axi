@@ -121,6 +121,7 @@ interface SpawnCall {
   /** Signals sent to the process group (process.kill(-pid, sig)). */
   groupKills: string[];
   destroyed: boolean;
+  unref: ReturnType<typeof vi.fn>;
 }
 
 const FAKE_PID = 4242;
@@ -138,6 +139,7 @@ function fakeSpawn(script: Script): SpawnCall[] {
       kills: [],
       groupKills: [],
       destroyed: false,
+      unref: vi.fn(),
     };
     calls.push(call);
     let exited = false;
@@ -169,6 +171,7 @@ function fakeSpawn(script: Script): SpawnCall[] {
     }) as never);
     const child = Object.assign(new EventEmitter(), {
       pid: FAKE_PID,
+      unref: call.unref,
       stdout: stream(),
       stderr: stream(),
       kill: (signal: string) => {
@@ -440,6 +443,7 @@ describe("workers tail", () => {
     const out = await run(["--name", "family-haze-bot", "--for", "5s"], 12_000);
     expect(calls[0].groupKills).toEqual(["SIGTERM", "SIGKILL"]);
     expect(calls[0].destroyed).toBe(true);
+    expect(calls[0].unref).toHaveBeenCalledOnce();
     expect(out).toContain("stopped: time limit");
     expect(out).toContain("events[1]");
   });
@@ -449,6 +453,7 @@ describe("workers tail", () => {
     const out = await run(["--name", "w", "--for", "5s"], 12_000);
     expect(calls[0].groupKills).toEqual(["SIGTERM", "SIGKILL"]);
     expect(calls[0].destroyed).toBe(true);
+    expect(calls[0].unref).toHaveBeenCalledOnce();
     expect(out).toContain("stopped: time limit");
   });
 

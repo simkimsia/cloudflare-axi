@@ -316,6 +316,7 @@ export function wranglerStream(
     const forceClose = () => {
       child.stdout?.destroy();
       child.stderr?.destroy();
+      child.unref();
       finish({
         exitCode: exitInfo?.code ?? null,
         signal: exitInfo?.signal ?? (stopping ? "SIGKILL" : null),
