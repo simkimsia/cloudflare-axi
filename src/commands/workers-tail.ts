@@ -68,7 +68,8 @@ export function formatSeconds(seconds: number): string {
  * Splits wrangler's `tail --format json` stdout into event objects. wrangler
  * prints each event as indented multi-line JSON (`JSON.stringify(e, null, 4)`)
  * with nothing between them, so this tracks brace depth outside strings
- * across chunks. Text outside an object (none expected) is ignored.
+ * across chunks. Text outside objects is retained in a bounded buffer so
+ * `strayMessages()` can recover wrangler's JSON-string fatal errors.
  */
 export class JsonObjectStream {
   private buffer = "";
