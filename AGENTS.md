@@ -82,7 +82,7 @@ the upstream `kunchenguid/axi` repo).
   `secret list --name`, so an unknown Worker or secret is NOT_FOUND with
   nothing deleted). `workers list` is REST-only (wrangler has no command
   that lists Workers): the scripts list and the account subdomain, then
-  per-Worker `schedules` and `subdomain` reads, at most 6 in flight, which
+  per-Worker `schedules` and `subdomain` reads, at most 6 requests in flight (3 Workers at a time), which
   degrade to `unknown` with a help line rather than fail the list. Its
   account comes from `workersAccountId`, shared with `delete`;
   `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts

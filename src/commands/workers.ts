@@ -907,8 +907,11 @@ export interface WorkerDetails {
  */
 const API_NO_SUBDOMAIN = 10007;
 
-/** Parallel per-Worker detail reads, to stay well under the API rate limit on large accounts. */
-const DETAIL_CONCURRENCY = 6;
+/**
+ * Workers whose detail reads run in parallel: each makes 2 GETs, so at most
+ * 6 requests in flight (3 Workers at a time), well under the API rate limit.
+ */
+const DETAIL_CONCURRENCY = 3;
 
 /**
  * One `workers list` row. `subdomain` is the account's workers.dev
