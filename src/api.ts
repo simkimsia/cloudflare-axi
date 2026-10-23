@@ -32,7 +32,7 @@ export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE";
 /**
  * Default per-request budget, covering both the response headers and the
  * body read. Without one, a hung api.cloudflare.com would stall a command for
- * undici's own ~300s. Every REST call here is a small JSON request.
+ * undici's own ~300s. Raw-body reads use the separate budget below.
  */
 export const API_TIMEOUT_MS = 30_000;
 

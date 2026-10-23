@@ -93,8 +93,7 @@ the upstream `kunchenguid/axi` repo).
   degrade to `unknown` with a help line rather than fail the list. Its
   account comes from `workersAccountId`, shared with `delete`;
   `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts
-  list only, under a 10s `HOME_WORKERS_TIMEOUT_MS`, a failure or timeout
-  shown as `could not list (<code>)`). Bare `workers`
+  list only; see README.md for request timeout behavior). Bare `workers`
   prints its help and points at `deployments`. A user's `--config` is carried, absolute and
   shell-quoted (`configSuffix` / `shellQuote` in `src/config.ts`), into every
   follow-up hint, including `workers` and `deployments` commands suggested by

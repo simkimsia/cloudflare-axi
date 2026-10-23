@@ -24,8 +24,7 @@ target in full and print what changed; nothing is inferred from context.
   and logged in (`wrangler login`, or `CLOUDFLARE_API_TOKEN` set)
 
 Commands that wrap `wrangler` use whatever credentials `wrangler` uses.
-Commands that call the Cloudflare REST API directly (currently `email`,
-because `wrangler` has no Email Routing surface) use `CLOUDFLARE_API_TOKEN`
+Commands that call the Cloudflare REST API directly use `CLOUDFLARE_API_TOKEN`
 if set, else the OAuth token `wrangler login` stored in its config
 (`~/.wrangler/config/default.toml`, or `~/Library/Preferences/.wrangler/...`
 on macOS). That OAuth token carries the `email_routing` scope by default;
@@ -103,6 +102,15 @@ commands (`pages`, `kv`, `whoami`, `email`) reject it. A `NOT_LINKED` error
 (no Worker config found) suggests it.
 
 Set `AXI_DEBUG=1` to print each forwarded `wrangler` argv and each REST method and path to stderr (no headers, bodies or tokens). stdout is unchanged.
+
+REST requests time out with an `UNKNOWN` error that names the request and
+elapsed budget. The defaults are defined in [`src/api.ts`](src/api.ts):
+JSON requests and raw KV value reads have separate budgets, both including
+the response body. The dashboard uses a shorter per-request budget from
+[`src/commands/home.ts`](src/commands/home.ts) for account lookup and Workers
+listing; a timeout renders `workers: could not list (UNKNOWN)`. These are
+request limits, not a deadline for the whole command: credential refresh and
+Wrangler subprocesses, including the Pages listing, remain outside them.
 
 Example output (TOON):
 

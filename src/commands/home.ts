@@ -9,9 +9,9 @@ import { listWorkerScripts } from "./workers.js";
 const HOME_ROW_LIMIT = 3;
 
 /**
- * The dashboard's Workers block is a glance, not the command's job: a slow
- * or hung API shows `workers: could not list (UNKNOWN)` after this long
- * instead of the REST default (API_TIMEOUT_MS in src/api.ts).
+ * Keep the optional Workers overview responsive with a shorter per-request
+ * budget than the REST default. Account lookup and scripts listing each get
+ * this budget; it does not bound credential refresh or Wrangler subprocesses.
  */
 export const HOME_WORKERS_TIMEOUT_MS = 10_000;
 
