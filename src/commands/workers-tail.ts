@@ -4,6 +4,8 @@ import {
   configRunOptions,
   configSource,
   configSuffix,
+  configWorkerName,
+  findWranglerConfig,
   takeConfig,
   withConfigContext,
 } from "../config.js";
@@ -73,12 +75,16 @@ export class JsonObjectStream {
   private depth = 0;
   private inString = false;
   private escaped = false;
+  private outside = "";
 
   push(chunk: string): unknown[] {
     const out: unknown[] = [];
     for (const ch of chunk) {
       if (this.depth === 0) {
-        if (ch !== "{") continue;
+        if (ch !== "{") {
+          this.outside = (this.outside + ch).slice(-4096);
+          continue;
+        }
         this.buffer = "";
       }
       this.buffer += ch;
@@ -103,6 +109,26 @@ export class JsonObjectStream {
       }
     }
     return out;
+  }
+
+  /**
+   * Bare JSON strings printed outside any event. In json mode wrangler
+   * prints its fatal errors that way, e.g. "Unable to reconnect to the
+   * tail for x after 5 attempts. ...".
+   */
+  strayMessages(): string[] {
+    const messages: string[] = [];
+    for (const line of this.outside.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('"')) continue;
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (typeof parsed === "string" && parsed.trim()) messages.push(parsed);
+      } catch {
+        // not a JSON string
+      }
+    }
+    return messages;
   }
 }
 
@@ -339,7 +365,7 @@ export async function workersTail(args: string[]): Promise<string> {
   const kept: TailEvent[] = [];
   const notices = new Set<string>();
   let skipped = 0;
-  let workerName = name;
+  let workerName = name ?? nameFromConfig(config);
   let stopReason: StopReason | undefined;
   const parser = new JsonObjectStream();
 
@@ -377,17 +403,21 @@ export async function workersTail(args: string[]): Promise<string> {
     stopReason ??= "interrupted";
     handle.stop();
   };
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
+  // wrangler runs in its own process group, so a terminal Ctrl-C reaches
+  // only this process: forward it from here.
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const sig of signals) process.once(sig, interrupt);
   const started = Date.now();
   const result = await handle.done;
   clearTimeout(timer);
-  process.removeListener("SIGINT", interrupt);
-  process.removeListener("SIGTERM", interrupt);
+  for (const sig of signals) process.removeListener(sig, interrupt);
   const elapsed = Math.round((Date.now() - started) / 1000);
 
   if (result.notInstalled) throw wranglerNotInstalledError();
-  const stderr = stripAnsi(result.stderr);
+  const stray = parser.strayMessages().map(stripAnsi);
+  const stderr = [stripAnsi(result.stderr), ...stray]
+    .filter(Boolean)
+    .join("\n");
   const failed =
     stopReason === undefined &&
     result.exitCode !== 0 &&
@@ -416,8 +446,9 @@ export async function workersTail(args: string[]): Promise<string> {
 
   const help: string[] = [];
   if (failed) {
+    const mapped = mapWranglerError(stderr, result.exitCode ?? 1);
     help.push(
-      `wrangler exited early: ${mapWranglerError(stderr, result.exitCode ?? 1).message}`,
+      `wrangler exited early: ${clip(mapped.code === "UNKNOWN" && stray.length > 0 ? stray[stray.length - 1] : mapped.message)}`,
     );
   }
   if (reconnects > 0) {
@@ -473,4 +504,18 @@ export async function workersTail(args: string[]): Promise<string> {
       : `events: 0 ${kind}`,
     renderHelp(help),
   ]);
+}
+
+/**
+ * The Worker wrangler tails without a name: the top-level `name` of the
+ * --config or find-up wrangler config. Best effort; wrangler still decides.
+ */
+function nameFromConfig(config: string | undefined): string | undefined {
+  const path = config ?? findWranglerConfig(process.cwd());
+  if (path === undefined) return undefined;
+  try {
+    return configWorkerName(path);
+  } catch {
+    return undefined;
+  }
 }

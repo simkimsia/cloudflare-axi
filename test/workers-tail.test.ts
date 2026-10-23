@@ -104,6 +104,13 @@ interface Script {
   afterTerm?: string[];
   /** Ignore SIGTERM (only SIGKILL ends it). */
   ignoreTerm?: boolean;
+  /**
+   * Like the real `wrangler` wrapper whose CLI grandchild keeps the pipes
+   * open: on a signal the direct child emits `exit`, but `close` never comes.
+   */
+  exitWithoutClose?: boolean;
+  /** Survive every signal: neither `exit` nor `close` is ever emitted. */
+  deaf?: boolean;
   enoent?: boolean;
 }
 
@@ -111,7 +118,12 @@ interface SpawnCall {
   args: string[];
   opts: { stdio?: unknown; cwd?: string; env?: Record<string, string> };
   kills: string[];
+  /** Signals sent to the process group (process.kill(-pid, sig)). */
+  groupKills: string[];
+  destroyed: boolean;
 }
+
+const FAKE_PID = 4242;
 
 function fakeSpawn(script: Script): SpawnCall[] {
   const calls: SpawnCall[] = [];
@@ -120,15 +132,49 @@ function fakeSpawn(script: Script): SpawnCall[] {
     args: string[],
     opts: SpawnCall["opts"],
   ) => {
-    const call: SpawnCall = { args, opts, kills: [] };
+    const call: SpawnCall = {
+      args,
+      opts,
+      kills: [],
+      groupKills: [],
+      destroyed: false,
+    };
     calls.push(call);
+    let exited = false;
     const stream = () =>
-      Object.assign(new EventEmitter(), { setEncoding: () => undefined });
+      Object.assign(new EventEmitter(), {
+        setEncoding: () => undefined,
+        destroy: () => {
+          call.destroyed = true;
+        },
+      });
+    const end = (code: number | null, signal: string | null) => {
+      if (exited) return;
+      exited = true;
+      child.emit("exit", code, signal);
+      if (!script.exitWithoutClose) child.emit("close", code, signal);
+    };
+    // POSIX group signals reach the fake child; once it has exited the
+    // group is gone (ESRCH), as for a real process group.
+    vi.spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal: string,
+    ) => {
+      if (pid !== -FAKE_PID || exited) {
+        throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+      }
+      call.groupKills.push(signal);
+      child.kill(signal);
+      return true;
+    }) as never);
     const child = Object.assign(new EventEmitter(), {
+      pid: FAKE_PID,
       stdout: stream(),
       stderr: stream(),
       kill: (signal: string) => {
+        if (exited) return false;
         call.kills.push(signal);
+        if (script.deaf) return true;
         if (signal === "SIGTERM" && script.ignoreTerm) return true;
         if (signal === "SIGTERM") {
           for (const chunk of script.afterTerm ?? []) {
@@ -136,8 +182,7 @@ function fakeSpawn(script: Script): SpawnCall[] {
           }
         }
         queueMicrotask(() =>
-          child.emit(
-            "close",
+          end(
             signal === "SIGKILL" ? null : 0,
             signal === "SIGKILL" ? "SIGKILL" : null,
           ),
@@ -155,7 +200,7 @@ function fakeSpawn(script: Script): SpawnCall[] {
       }
       if (script.stderr) child.stderr.emit("data", script.stderr);
       for (const chunk of script.chunks ?? []) child.stdout.emit("data", chunk);
-      if (script.exit !== undefined) child.emit("close", script.exit, null);
+      if (script.exit !== undefined) end(script.exit, null);
     });
     return child;
   }) as never);
@@ -170,6 +215,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 /** Run the command and advance fake time until it settles. */
@@ -375,6 +421,63 @@ describe("workers tail", () => {
     const out = await run(["--name", "w", "--for", "5s"], 5_000 + 5_000);
     expect(calls[0].kills).toEqual(["SIGTERM", "SIGKILL"]);
     expect(out).toContain("stopped: time limit");
+  });
+
+  it("spawns wrangler in its own process group and signals the whole group", async () => {
+    const calls = fakeSpawn({ chunks: [json(FETCH_EVENT)] });
+    await run(["--name", "family-haze-bot", "--for", "5s"], 5_000);
+    expect(calls[0].opts).toMatchObject({ detached: true });
+    expect(calls[0].groupKills).toEqual(["SIGTERM"]);
+  });
+
+  it("still returns within the bound when wrangler exits but its pipes never close", async () => {
+    const calls = fakeSpawn({
+      chunks: [json(FETCH_EVENT)],
+      ignoreTerm: true,
+      exitWithoutClose: true,
+    });
+    // 5s window + 5s SIGTERM grace + 2s close grace.
+    const out = await run(["--name", "family-haze-bot", "--for", "5s"], 12_000);
+    expect(calls[0].groupKills).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls[0].destroyed).toBe(true);
+    expect(out).toContain("stopped: time limit");
+    expect(out).toContain("events[1]");
+  });
+
+  it("returns even when the exit of a stopped wrangler never arrives", async () => {
+    const calls = fakeSpawn({ deaf: true });
+    const out = await run(["--name", "w", "--for", "5s"], 12_000);
+    expect(calls[0].groupKills).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls[0].destroyed).toBe(true);
+    expect(out).toContain("stopped: time limit");
+  });
+
+  it("names the Worker from the wrangler config when --name is omitted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-axi-tail-name-"));
+    try {
+      const config = join(dir, "wrangler.toml");
+      writeFileSync(config, 'name = "haze-from-config"\n');
+      fakeSpawn({});
+      const out = await run(["--config", config]);
+      expect(out).toContain("worker: haze-from-config");
+      expect(out).toContain("--name haze-from-config --cron --for 6m");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses wrangler's JSON-string fatal error from stdout for the early-exit note", async () => {
+    fakeSpawn({
+      chunks: [
+        json(FETCH_EVENT),
+        '"Unable to reconnect to the tail for family-haze-bot after 5 attempts. Please re-run `wrangler tail family-haze-bot` to start a new session."\n',
+      ],
+      exit: 1,
+    });
+    const out = await run(["--name", "family-haze-bot"], 0);
+    expect(out).toContain(
+      "wrangler exited early: Unable to reconnect to the tail for family-haze-bot after 5 attempts",
+    );
   });
 
   it("maps a failure before any event (unknown Worker) to NOT_FOUND", async () => {

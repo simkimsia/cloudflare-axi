@@ -178,23 +178,35 @@ function stripJsonc(text: string): string {
  * wrangler run read it first. An unreadable config is a VALIDATION_ERROR.
  */
 export function configAccountId(path: string): string | undefined {
+  return topLevelString(readConfigObject(path, "account_id"), "account_id");
+}
+
+/**
+ * Top-level `name` of a wrangler config: the Worker wrangler acts on when no
+ * name is passed (top-level only; `--env` is not supported here).
+ */
+export function configWorkerName(path: string): string | undefined {
+  return topLevelString(readConfigObject(path, "name"), "name");
+}
+
+function readConfigObject(path: string, field: string): unknown {
   const text = readFileSync(path, "utf8");
-  let parsed: unknown;
   try {
     // A real TOML parser, so quoted keys ("account_id" = ...), literal
     // strings and inline comments all read the way wrangler reads them.
-    parsed = path.endsWith(".toml")
+    return path.endsWith(".toml")
       ? parseToml(text)
       : JSON.parse(stripJsonc(text));
   } catch {
     throw new AxiError(
-      `Could not parse ${path} to read its account_id`,
+      `Could not parse ${path} to read its ${field}`,
       "VALIDATION_ERROR",
       ["Fix the wrangler config, or pass `--config <path>` to a valid one"],
     );
   }
-  const account = (parsed as { account_id?: unknown } | null)?.account_id;
-  return typeof account === "string" && account.trim()
-    ? account.trim()
-    : undefined;
+}
+
+function topLevelString(parsed: unknown, field: string): string | undefined {
+  const value = (parsed as Record<string, unknown> | null)?.[field];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

@@ -240,27 +240,65 @@ export interface StreamHandle {
 
 const STREAM_STDERR_KEEP = 64 * 1024;
 export const STREAM_KILL_GRACE_MS = 5000;
+/**
+ * How long to wait for stdout/stderr to close after the child exits (or
+ * after SIGKILL) before destroying the pipes and returning anyway.
+ */
+export const STREAM_CLOSE_GRACE_MS = 2000;
 
 /**
  * Spawn a long-running wrangler command (e.g. `tail`) and hand stdout to
  * `onStdout` as it arrives. stdin is /dev/null so wrangler never waits on
  * it. The caller bounds it by calling `stop()`; nothing here ever waits
  * without an end.
+ *
+ * The `wrangler` bin is a wrapper that runs the real CLI as a grandchild
+ * sharing our pipes, so killing only the direct child is not enough. On
+ * POSIX the child gets its own process group (`detached`) and every signal
+ * goes to the whole group. Because the group is not the terminal's
+ * foreground group, a Ctrl-C does not reach wrangler on its own: callers
+ * stop it from their own SIGINT/SIGTERM handlers, and this process kills
+ * the group on exit. As a backstop, once the child has exited (or SIGKILL
+ * was sent) the pipes are destroyed after STREAM_CLOSE_GRACE_MS, so `done`
+ * always settles even if a straggler holds them open.
  */
 export function wranglerStream(
   args: string[],
   opts: RunOptions & { onStdout: (chunk: string) => void },
 ): StreamHandle {
   debugWrangler(args, opts.cwd);
+  const group = process.platform !== "win32";
   const child = spawn("wrangler", args, {
     stdio: ["ignore", "pipe", "pipe"],
+    detached: group,
     ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
   let stderr = "";
-  let exited = false;
+  let settled = false;
   let stopping = false;
-  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let exitInfo: { code: number | null; signal: string | null } | undefined;
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  let stopHook: (killAfterMs: number) => void = () => undefined;
+
+  const signal = (sig: NodeJS.Signals) => {
+    if (group && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, sig);
+        return;
+      } catch {
+        // group already gone, or no permission: fall back to the child
+      }
+    }
+    try {
+      child.kill(sig);
+    } catch {
+      // already exited
+    }
+  };
+  const killOnExit = () => signal("SIGKILL");
+  process.once("exit", killOnExit);
+
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => opts.onStdout(chunk));
@@ -269,10 +307,21 @@ export function wranglerStream(
   });
   const done = new Promise<StreamResult>((resolve) => {
     const finish = (result: StreamResult) => {
-      if (exited) return;
-      exited = true;
-      if (killTimer) clearTimeout(killTimer);
+      if (settled) return;
+      settled = true;
+      for (const t of timers) clearTimeout(t);
+      process.removeListener("exit", killOnExit);
       resolve(result);
+    };
+    const forceClose = () => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      finish({
+        exitCode: exitInfo?.code ?? null,
+        signal: exitInfo?.signal ?? (stopping ? "SIGKILL" : null),
+        stderr,
+        notInstalled: false,
+      });
     };
     child.on("error", (error: NodeJS.ErrnoException) => {
       finish({
@@ -282,18 +331,31 @@ export function wranglerStream(
         notInstalled: error.code === "ENOENT",
       });
     });
-    child.on("close", (code: number | null, signal: string | null) => {
-      finish({ exitCode: code, signal, stderr, notInstalled: false });
+    child.on("exit", (code: number | null, sig: string | null) => {
+      exitInfo = { code, signal: sig };
+      // A grandchild may still hold the pipes: take the group down too,
+      // and stop waiting for `close` after a grace period.
+      if (group) signal("SIGKILL");
+      timers.push(setTimeout(forceClose, STREAM_CLOSE_GRACE_MS));
     });
+    child.on("close", (code: number | null, sig: string | null) => {
+      finish({ exitCode: code, signal: sig, stderr, notInstalled: false });
+    });
+    stopHook = (killAfterMs) => {
+      signal("SIGTERM");
+      timers.push(
+        setTimeout(() => {
+          signal("SIGKILL");
+          timers.push(setTimeout(forceClose, STREAM_CLOSE_GRACE_MS));
+        }, killAfterMs),
+      );
+    };
   });
   return {
     stop(killAfterMs = STREAM_KILL_GRACE_MS) {
-      if (exited || stopping) return;
+      if (settled || stopping) return;
       stopping = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!exited) child.kill("SIGKILL");
-      }, killAfterMs);
+      stopHook(killAfterMs);
     },
     done,
   };
