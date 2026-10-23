@@ -906,8 +906,8 @@ describe("workers (bare)", () => {
     expect((await failure(workersCommand(["--bogus"]))).code).toBe(
       "VALIDATION_ERROR",
     );
-    expect((await failure(workersCommand(["tail"]))).message).toContain(
-      "unknown subcommand tail",
+    expect((await failure(workersCommand(["logs"]))).message).toContain(
+      "unknown subcommand logs",
     );
   });
 
@@ -916,7 +916,9 @@ describe("workers (bare)", () => {
     const out = await workersCommand([]);
     expect(calls).toEqual([]);
     expect(out).toContain("usage: cloudflare-axi workers");
-    expect(out).toContain("deploy, delete, secret put <KEY>|list|delete <KEY>");
+    expect(out).toContain(
+      "deploy, delete, tail, secret put <KEY>|list|delete <KEY>",
+    );
     expect(out).toContain(
       "Run `cloudflare-axi deployments` for recent deployments",
     );

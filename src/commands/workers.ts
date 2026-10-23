@@ -39,17 +39,20 @@ import {
   type WranglerOutputEntry,
 } from "../wrangler.js";
 import { resolveAccountId } from "../zones.js";
+import { workersTail } from "./workers-tail.js";
 
 export const WORKERS_HELP = `usage: cloudflare-axi workers [subcommand] [flags]
-Cloudflare Workers: list the account's Workers, deploy or delete a Worker and manage its secrets.
-subcommands[4]:
-  list, deploy, delete, secret put <KEY>|list|delete <KEY>
+Cloudflare Workers: list the account's Workers, deploy or delete a Worker, tail its live logs and manage its secrets.
+subcommands[5]:
+  list, deploy, delete, tail, secret put <KEY>|list|delete <KEY>
 flags{list}:
   --config <path> (only picks the account: the config's account_id)
 flags{deploy}:
   --name <worker> (required unless --dry-run; must match the Worker the config deploys; never forwarded), --config <path>, --outdir <dir>, --dry-run
 flags{delete}:
   --name <worker> (required), --force (delete even when other Workers depend on it; they break), --config <path>
+flags{tail}:
+  --name <worker> (default: the Worker in the wrangler config), --config <path>, --for <duration> (default 60s, 5s..30m), --max-events <n> (default 50, max 500), --status ok|error|canceled (comma-separated), --cron (only scheduled events)
 flags{secret}:
   --name <worker> (required for put and delete), --config <path>
 notes:
@@ -59,17 +62,19 @@ notes:
   a real deploy runs \`wrangler deploy --dry-run\` first and refuses when --name differs from the Worker name wrangler resolves
   deploy --dry-run bundles locally and uploads nothing
   delete removes the Worker irreversibly, with its secrets, cron triggers, routes, custom domains and workers.dev URL; it needs --name (never inferred from cwd) and refuses a Worker other Workers depend on unless --force
+  tail is bounded: it stops after --for or --max-events, whichever comes first, and prints one row per invocation (time, trigger, outcome, status, console lines, exceptions) plus a count; it never prints request headers or query strings
   secret put reads the value from stdin only; it never takes it as an argument and never prints it
   secret put refuses a Worker that does not exist (wrangler would silently create a draft Worker)
   secret delete needs the Worker and the secret named exactly; an unknown Worker or secret is NOT_FOUND and nothing is deleted
   secret list shows names and types only; Cloudflare never returns secret values
   recent deployments: \`cloudflare-axi deployments\`
-  not wrapped yet: tail, secret bulk, --env; use \`wrangler\` for those
+  not wrapped yet: secret bulk, --env; use \`wrangler\` for those
 examples:
   cloudflare-axi workers list
   cloudflare-axi workers deploy --dry-run
   cloudflare-axi workers deploy --dry-run --config ~/Projects/family-haze-bot/wrangler.toml
   cloudflare-axi workers deploy --name family-haze-bot
+  cloudflare-axi workers tail --name family-haze-bot --cron --for 6m
   cloudflare-axi workers secret list --name family-haze-bot
   printf %s "$TELEGRAM_BOT_TOKEN" | cloudflare-axi workers secret put TELEGRAM_BOT_TOKEN --name family-haze-bot
   cloudflare-axi workers secret delete TELEGRAM_BOT_TOKEN --name family-haze-bot
@@ -1092,7 +1097,7 @@ async function workersList(args: string[]): Promise<string> {
 
 // ---- dispatch ----
 
-const SUBCOMMANDS = ["list", "deploy", "delete", "secret"] as const;
+const SUBCOMMANDS = ["list", "deploy", "delete", "tail", "secret"] as const;
 const SECRET_SUBCOMMANDS = ["put", "list", "delete"] as const;
 
 async function secretCommand(args: string[]): Promise<string> {
@@ -1155,6 +1160,8 @@ export async function workersCommand(args: string[]): Promise<string> {
       return deploy(rest);
     case "delete":
       return deleteWorker(rest);
+    case "tail":
+      return workersTail(rest);
     case "secret":
       return secretCommand(rest);
   }

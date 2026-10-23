@@ -199,7 +199,7 @@ const patterns: ErrorPattern[] = [
     code: "NOT_FOUND",
     suggestions: [
       "Run `cloudflare-axi workers deploy --dry-run` (from the Worker's directory, or with `--config <path>`) to see the Worker name its config deploys",
-      "cloudflare-axi cannot list the account's Workers yet; check the exact name under Workers & Pages in the Cloudflare dashboard",
+      "Run `cloudflare-axi workers list` to see the exact names of the account's Workers",
       "A new Worker must be deployed first: `cloudflare-axi workers deploy --name <worker>`",
     ],
   },
