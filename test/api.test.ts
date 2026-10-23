@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { mapApiError, REPORT_SUGGESTION } from "../src/errors.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  API_BYTES_TIMEOUT_MS,
+  API_TIMEOUT_MS,
+  cfGet,
+  cfGetBytes,
+} from "../src/api.js";
+import { AxiError, mapApiError, REPORT_SUGGESTION } from "../src/errors.js";
 
 // Real api.cloudflare.com envelopes captured live 2026-09-04.
 const AUTH_10000 = [
@@ -68,5 +74,78 @@ describe("mapApiError", () => {
 
   it("reports the HTTP status when the envelope has no errors", () => {
     expect(mapApiError(502, [], "/zones").message).toBe("HTTP 502 from /zones");
+  });
+});
+
+describe("REST request timeout", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  /** A fetch that never answers, rejecting only when its signal aborts. */
+  function hangingFetch() {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) return; // would hang forever: the bug this guards
+          if (signal.aborted) reject(signal.reason);
+          signal.addEventListener("abort", () => reject(signal.reason));
+        }),
+    );
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("gives every call a default timeout and reports a hang as UNKNOWN", async () => {
+    hangingFetch();
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const err = await cfGet("/accounts", { timeoutMs: 20 }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(AxiError);
+    expect((err as AxiError).code).toBe("UNKNOWN");
+    expect((err as AxiError).message).toBe(
+      "The Cloudflare API did not answer within 0.02s (GET /accounts)",
+    );
+    expect(timeout).toHaveBeenCalledWith(20);
+
+    timeout.mockImplementation(() =>
+      AbortSignal.abort(new DOMException("timed out", "TimeoutError")),
+    );
+    const byDefault = await cfGet("/accounts").catch((e: unknown) => e);
+    expect((byDefault as AxiError).message).toContain(
+      `within ${API_TIMEOUT_MS / 1000}s`,
+    );
+    expect(timeout).toHaveBeenLastCalledWith(API_TIMEOUT_MS);
+  });
+
+  it("gives raw-body reads a longer default budget", async () => {
+    hangingFetch();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() =>
+        AbortSignal.abort(new DOMException("timed out", "TimeoutError")),
+      );
+    const err = await cfGetBytes("/x/values/k").catch((e: unknown) => e);
+    expect((err as AxiError).code).toBe("UNKNOWN");
+    expect(timeout).toHaveBeenCalledWith(API_BYTES_TIMEOUT_MS);
+  });
+
+  it("still says the API could not be reached on a network error", async () => {
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    const err = await cfGet("/accounts").catch((e: unknown) => e);
+    expect((err as AxiError).message).toBe(
+      "Could not reach the Cloudflare API: fetch failed",
+    );
   });
 });

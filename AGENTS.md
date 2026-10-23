@@ -41,7 +41,11 @@ the upstream `kunchenguid/axi` repo).
 - `src/api.ts` — sole place that calls the Cloudflare REST API directly
   (`cfGet`/`cfRequest`; `cfGetPage` adds `result_info` for cursor paging;
   `cfGetBytes` reads raw-body endpoints such as KV values), only for surfaces
-  wrangler has no subcommand for (VISION.md: wrangler first). API failures
+  wrangler has no subcommand for (VISION.md: wrangler first). Every request,
+  body read included, runs under `AbortSignal.timeout` (`API_TIMEOUT_MS` 30s,
+  `API_BYTES_TIMEOUT_MS` 120s for `cfGetBytes`, or a caller's `timeoutMs`); a
+  timeout is an UNKNOWN "did not answer within Ns". Wrangler spawns have no
+  timeout yet. API failures
   map through `mapApiError` in `src/errors.ts` (numeric codes, not stderr
   text) into the same AxiError codes, as a `CloudflareApiError` that keeps
   `apiCodes` for callers that branch on them.
@@ -89,7 +93,8 @@ the upstream `kunchenguid/axi` repo).
   degrade to `unknown` with a help line rather than fail the list. Its
   account comes from `workersAccountId`, shared with `delete`;
   `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts
-  list only, a failure shown as `could not list (<code>)`). Bare `workers`
+  list only, under a 10s `HOME_WORKERS_TIMEOUT_MS`, a failure or timeout
+  shown as `could not list (<code>)`). Bare `workers`
   prints its help and points at `deployments`. A user's `--config` is carried, absolute and
   shell-quoted (`configSuffix` / `shellQuote` in `src/config.ts`), into every
   follow-up hint, including `workers` and `deployments` commands suggested by

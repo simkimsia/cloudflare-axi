@@ -1,4 +1,4 @@
-import { cfGet } from "./api.js";
+import { cfGet, type ApiRequestOptions } from "./api.js";
 import { AxiError } from "./errors.js";
 
 export interface ZoneRef {
@@ -61,10 +61,12 @@ interface ApiAccount {
  * CLOUDFLARE_ACCOUNT_ID env var, else the token's sole account. Multiple
  * accounts is an error naming them so the agent can pick one explicitly.
  */
-export async function resolveAccountId(): Promise<string> {
+export async function resolveAccountId(
+  options?: ApiRequestOptions,
+): Promise<string> {
   const envAccount = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
   if (envAccount) return envAccount;
-  const accounts = await cfGet<ApiAccount[]>("/accounts?per_page=50");
+  const accounts = await cfGet<ApiAccount[]>("/accounts?per_page=50", options);
   if (accounts.length === 1) return accounts[0].id;
   if (accounts.length === 0) {
     throw new AxiError(

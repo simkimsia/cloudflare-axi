@@ -8,7 +8,7 @@ vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 
 import { execFile } from "node:child_process";
 import { shellQuote } from "../src/config.js";
-import { homeCommand } from "../src/commands/home.js";
+import { HOME_WORKERS_TIMEOUT_MS, homeCommand } from "../src/commands/home.js";
 import { toWorkerRow, workersCommand } from "../src/commands/workers.js";
 import { failure, fakeWrangler } from "./fake-wrangler.js";
 
@@ -268,6 +268,34 @@ describe("workers list", () => {
     expect(paths).toEqual([]);
   });
 
+  it("keeps at most 6 detail requests in flight (3 Workers at a time)", async () => {
+    fakeWrangler(() => ({}));
+    const scripts = Array.from({ length: 10 }, (_, i) => ({
+      id: `w${i}`,
+      modified_on: ago(i + 1),
+    }));
+    stubApi({ scripts });
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    let inFlight = 0;
+    let peak = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const detail = /\/scripts\/[^/]+\/(schedules|subdomain)$/.test(url);
+        if (!detail) return answer(url);
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return answer(url);
+      }),
+    );
+    const out = await workersCommand(["list"]);
+    expect(out).toContain("count: 10 Workers");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2 + 2 * scripts.length);
+    expect(peak).toBe(6);
+  });
+
   it("is in the workers help", async () => {
     const out = await workersCommand([]);
     expect(out).toContain("list, deploy, delete");
@@ -319,6 +347,42 @@ describe("dashboard workers block", () => {
     );
     const out = await homeCommand();
     expect(out).toContain("workers: could not list (AUTH)");
+    expect(out).toContain("projects[1]");
+  });
+
+  it("says an empty account has 0 Workers", async () => {
+    wrangler();
+    const paths = stubApi({ scripts: [] });
+    const out = await homeCommand();
+    expect(out).toContain("workers: 0 Workers in this account");
+    expect(out).not.toContain("could not list");
+    expect(out).not.toContain("cloudflare-axi workers list` for");
+    expect(paths).toEqual(["/accounts/acc/workers/scripts"]);
+  });
+
+  it("gives up on a hung API after a short timeout and says it could not list", async () => {
+    wrangler();
+    stubApi();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() =>
+        AbortSignal.abort(new DOMException("timed out", "TimeoutError")),
+      );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (signal?.aborted) reject(signal.reason);
+            signal?.addEventListener("abort", () => reject(signal.reason));
+          }),
+      ),
+    );
+    const out = await homeCommand();
+    expect(timeout).toHaveBeenCalledWith(HOME_WORKERS_TIMEOUT_MS);
+    expect(HOME_WORKERS_TIMEOUT_MS).toBe(10_000);
+    expect(out).toContain("workers: could not list (UNKNOWN)");
     expect(out).toContain("projects[1]");
   });
 });

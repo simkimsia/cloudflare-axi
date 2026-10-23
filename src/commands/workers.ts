@@ -18,7 +18,7 @@ import {
   withConfigContext,
   wranglerConfigSuffix,
 } from "../config.js";
-import { cfGet } from "../api.js";
+import { cfGet, type ApiRequestOptions } from "../api.js";
 import {
   AxiError,
   CloudflareApiError,
@@ -656,12 +656,13 @@ async function workersAccountId(
   config: string | undefined,
   outcome = "nothing deleted",
   target = "the account that owns the Worker",
+  options?: ApiRequestOptions,
 ): Promise<string> {
   const path = config ?? findWranglerConfig(process.cwd());
   const fromConfig = path === undefined ? undefined : configAccountId(path);
   if (fromConfig) return fromConfig;
   try {
-    return await resolveAccountId();
+    return await resolveAccountId(options);
   } catch (error) {
     if (error instanceof AxiError && error.code === "VALIDATION_ERROR") {
       throw new AxiError(`${error.message}; ${outcome}`, error.code, [
@@ -972,9 +973,13 @@ async function mapLimit<T, R>(
 
 /**
  * The account's Workers, newest change first, from the REST API: wrangler
- * has no command that lists them. Shared with the dashboard.
+ * has no command that lists them. Shared with the dashboard, which passes a
+ * short `timeoutMs` so a hung API cannot stall it.
  */
-export async function listWorkerScripts(config: string | undefined): Promise<{
+export async function listWorkerScripts(
+  config: string | undefined,
+  options?: ApiRequestOptions,
+): Promise<{
   account: string;
   scripts: (ApiWorkerScript & { id: string })[];
 }> {
@@ -982,10 +987,12 @@ export async function listWorkerScripts(config: string | undefined): Promise<{
     config,
     "nothing listed",
     "the account to list",
+    options,
   );
   const scripts = (
     (await cfGet<ApiWorkerScript[] | null>(
       `/accounts/${account}/workers/scripts`,
+      options,
     )) ?? []
   )
     .filter((s): s is ApiWorkerScript & { id: string } => !!s.id)

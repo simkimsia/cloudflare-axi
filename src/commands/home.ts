@@ -9,6 +9,13 @@ import { listWorkerScripts } from "./workers.js";
 const HOME_ROW_LIMIT = 3;
 
 /**
+ * The dashboard's Workers block is a glance, not the command's job: a slow
+ * or hung API shows `workers: could not list (UNKNOWN)` after this long
+ * instead of the REST default (API_TIMEOUT_MS in src/api.ts).
+ */
+export const HOME_WORKERS_TIMEOUT_MS = 10_000;
+
+/**
  * `config` is the resolved `--config` path from `cloudflare-axi --config <path>`
  * (parsed in src/cli.ts). With it, the Worker section is required: a failure
  * is reported, not swapped for the Pages fallback.
@@ -44,7 +51,9 @@ export async function homeCommand(config?: string): Promise<string> {
       "list",
       "--json",
     ]).catch(() => [] as PagesProjectRow[]),
-    listWorkerScripts(undefined).then(
+    listWorkerScripts(undefined, {
+      timeoutMs: HOME_WORKERS_TIMEOUT_MS,
+    }).then(
       (r) => r.scripts,
       (error: unknown) => error,
     ),
