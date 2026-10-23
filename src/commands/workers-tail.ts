@@ -138,7 +138,7 @@ export function isCronEvent(event: TailEvent): boolean {
 export function redactSecrets(text: string): string {
   return text
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
-    .replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, "<redacted>")
+    .replace(/(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}(?![\w-])/g, "<redacted>")
     .replace(
       /\b(authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|token|secret|password)(["']?\s*[:=]\s*["']?)([^\s"',;&}]+)/gi,
       "$1$2<redacted>",
@@ -159,15 +159,17 @@ function show(value: unknown): string {
   }
 }
 
-/** Path only: the query string can carry tokens, so it is reduced to "?…". */
+/** Path only: the query string can carry tokens, so it is reduced to "?…", and the path is redacted. */
 export function safePath(url: string): string {
+  let path: string;
   try {
     const u = new URL(url);
-    return `${u.pathname}${u.search ? "?…" : ""}`;
+    path = `${u.pathname}${u.search ? "?…" : ""}`;
   } catch {
     const q = url.indexOf("?");
-    return q === -1 ? url : `${url.slice(0, q)}?…`;
+    path = q === -1 ? url : `${url.slice(0, q)}?…`;
   }
+  return redactSecrets(path);
 }
 
 function str(value: unknown): string | undefined {
@@ -345,7 +347,7 @@ export async function workersTail(args: string[]): Promise<string> {
     ...configRunOptions(config),
     onStdout: (chunk) => {
       for (const obj of parser.push(chunk)) {
-        if (stopReason === "max events") return;
+        if (kept.length >= maxEvents) return;
         const event = obj as TailEvent;
         const notice = tailInfoMessage(event);
         if (notice !== undefined) {
@@ -359,7 +361,7 @@ export async function workersTail(args: string[]): Promise<string> {
         }
         kept.push(event);
         if (kept.length >= maxEvents) {
-          stopReason = "max events";
+          stopReason ??= "max events";
           handle.stop();
         }
       }
@@ -432,8 +434,10 @@ export async function workersTail(args: string[]): Promise<string> {
   if (kept.length === 0) {
     help.push(
       cronOnly
-        ? `No cron event in ${formatSeconds(seconds)}: a cron fires on its schedule, so use a --for longer than its interval (a "*/5 * * * *" cron needs --for 6m)`
-        : `No invocations reached the Worker in ${formatSeconds(seconds)}; send it a request, or use a --for longer than its cron interval`,
+        ? `No cron event in the ${formatSeconds(elapsed)} tailed: a cron fires on its schedule, so use a --for longer than its interval (a "*/5 * * * *" cron needs --for 6m)`
+        : statuses.length > 0
+          ? `No invocations matching --status ${statuses.join(",")} in the ${formatSeconds(elapsed)} tailed; other invocations are filtered out by Cloudflare`
+          : `No invocations reached the Worker in the ${formatSeconds(elapsed)} tailed; send it a request, or use a --for longer than its cron interval`,
     );
   }
   help.push(
