@@ -26,7 +26,10 @@ the upstream `kunchenguid/axi` repo).
   always closes the child's stdin (writing `input` when given) so wrangler
   never waits on it. `wranglerExecWithOutput` points
   `WRANGLER_OUTPUT_FILE_PATH` at a private temp file and returns its parsed
-  ND-JSON entries (`parseOutputEntries`) next to stdout.
+  ND-JSON entries (`parseOutputEntries`) next to stdout. `wranglerStream`
+  spawns a long-running command (`tail`) with stdin ignored, hands stdout
+  chunks to a callback and is bounded by the caller's `stop()` (SIGTERM,
+  then SIGKILL after 5s).
 - `src/debug.ts` — `AXI_DEBUG=1` prints each wrangler argv (from `run` in
   `src/wrangler.ts`) and each REST method and path (from `cfRequest`) to
   stderr, with `CLOUDFLARE_API_TOKEN` masked. Never headers or bodies.
@@ -92,6 +95,13 @@ the upstream `kunchenguid/axi` repo).
   follow-up hint, including `workers` and `deployments` commands suggested by
   mapped wrangler errors (`carryConfig`). Without the ND-JSON `deploy` entry (or its
   `targets`), a real deploy reports urls/crons as `unknown`, never `none`.
+- `src/commands/workers-tail.ts` — `workers tail`: runs
+  `wrangler tail [name] --format json` through `wranglerStream`, stopped at `--for` (default 60s,
+  max 30m), `--max-events` (default 50) or SIGINT/SIGTERM of this process.
+  `JsonObjectStream` splits wrangler's concatenated indented JSON events;
+  rows drop request headers, cf data and the query string, and console
+  lines pass through `redactSecrets` and a 200-char clip. Offline tests mock
+  `spawn` (`test/workers-tail.test.ts`).
 - Commands live in `src/commands/`, return TOON strings via `src/toon.ts`
   helpers; errors render through the `formatError` hook in `src/cli.ts`
   because the SDK's default formatter only recognizes its own AxiError class.
@@ -255,6 +265,17 @@ the upstream `kunchenguid/axi` repo).
   `cloudflare-axi workers secret delete <KEY> --name <worker>`, and a
   throwaway KV namespace with `cloudflare-axi kv drop <title>`. Never
   smoke a real deploy, put or delete against a real Worker.
+- `wrangler tail` (4.127.1 `src/tail/`): `--format json` (the default when
+  stdout is not a TTY) prints each event as `JSON.stringify(e, null, 4)` on
+  stdout, no banner; warnings such as "Tail connection lost. Reconnecting
+  (attempt n of 5)" go to stderr, and after 5 failed reconnects it exits 1
+  with "Unable to reconnect to the tail ...". SIGINT/SIGTERM make it delete
+  its server-side tail and exit 0. `--status` takes ok|error|canceled (error
+  = exception, exceededCpu, exceededMemory, unknown). Event shapes: `event`
+  has `request`+`response` (fetch), `cron`+`scheduledTime` (scheduled),
+  `scheduledTime` only (alarm), `queue`, `mailFrom`, `rpcMethod`,
+  `consumedEvents` (tail), or `type`+`message` (an overload notice, not an
+  invocation). Not yet run live through the wrapper.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
 - The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`

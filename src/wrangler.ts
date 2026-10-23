@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -216,4 +216,85 @@ export async function wranglerExecWithOutput(
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** How a streamed wrangler child ended. */
+export interface StreamResult {
+  /** Exit code, or null when a signal ended it. */
+  exitCode: number | null;
+  signal: string | null;
+  /** The last 64 KiB of stderr (warnings such as tail reconnects, errors). */
+  stderr: string;
+  /** The wrangler binary was not found. */
+  notInstalled: boolean;
+}
+
+export interface StreamHandle {
+  /**
+   * Ask wrangler to stop (SIGTERM, which `wrangler tail` handles by deleting
+   * its tail on the server), then SIGKILL after `killAfterMs`. Idempotent.
+   */
+  stop(killAfterMs?: number): void;
+  done: Promise<StreamResult>;
+}
+
+const STREAM_STDERR_KEEP = 64 * 1024;
+export const STREAM_KILL_GRACE_MS = 5000;
+
+/**
+ * Spawn a long-running wrangler command (e.g. `tail`) and hand stdout to
+ * `onStdout` as it arrives. stdin is /dev/null so wrangler never waits on
+ * it. The caller bounds it by calling `stop()`; nothing here ever waits
+ * without an end.
+ */
+export function wranglerStream(
+  args: string[],
+  opts: RunOptions & { onStdout: (chunk: string) => void },
+): StreamHandle {
+  debugWrangler(args, opts.cwd);
+  const child = spawn("wrangler", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+  });
+  let stderr = "";
+  let exited = false;
+  let stopping = false;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => opts.onStdout(chunk));
+  child.stderr?.on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-STREAM_STDERR_KEEP);
+  });
+  const done = new Promise<StreamResult>((resolve) => {
+    const finish = (result: StreamResult) => {
+      if (exited) return;
+      exited = true;
+      if (killTimer) clearTimeout(killTimer);
+      resolve(result);
+    };
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      finish({
+        exitCode: 127,
+        signal: null,
+        stderr: error.message,
+        notInstalled: error.code === "ENOENT",
+      });
+    });
+    child.on("close", (code: number | null, signal: string | null) => {
+      finish({ exitCode: code, signal, stderr, notInstalled: false });
+    });
+  });
+  return {
+    stop(killAfterMs = STREAM_KILL_GRACE_MS) {
+      if (exited || stopping) return;
+      stopping = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (!exited) child.kill("SIGKILL");
+      }, killAfterMs);
+    },
+    done,
+  };
 }
