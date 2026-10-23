@@ -1,8 +1,10 @@
 import { configSource, configSuffix } from "../config.js";
-import { renderHelp, renderList, renderOutput } from "../toon.js";
+import { AxiError } from "../errors.js";
+import { relativeTime, renderHelp, renderList, renderOutput } from "../toon.js";
 import { wranglerJson } from "../wrangler.js";
 import { listDeployments, toDeploymentRows } from "./deployments.js";
 import { toPagesRows, type PagesProjectRow } from "./pages.js";
+import { listWorkerScripts } from "./workers.js";
 
 const HOME_ROW_LIMIT = 3;
 
@@ -30,17 +32,23 @@ export async function homeCommand(config?: string): Promise<string> {
       renderHelp([
         `Run \`cloudflare-axi deployments${suffix}\` for the full deployment list`,
         `Run \`cloudflare-axi workers deploy --dry-run${suffix}\` to bundle-check it`,
-        "Run `cloudflare-axi pages` or `cloudflare-axi kv` for account-wide views",
+        "Run `cloudflare-axi workers list`, `cloudflare-axi pages` or `cloudflare-axi kv` for account-wide views",
       ]),
     ]);
   }
 
-  const projects = await wranglerJson<PagesProjectRow[]>([
-    "pages",
-    "project",
-    "list",
-    "--json",
-  ]).catch(() => [] as PagesProjectRow[]);
+  const [projects, workers] = await Promise.all([
+    wranglerJson<PagesProjectRow[]>([
+      "pages",
+      "project",
+      "list",
+      "--json",
+    ]).catch(() => [] as PagesProjectRow[]),
+    listWorkerScripts(undefined).then(
+      (r) => r.scripts,
+      (error: unknown) => error,
+    ),
+  ]);
 
   const blocks: string[] = ["worker: none configured in this directory"];
   const hints: string[] = [];
@@ -56,6 +64,34 @@ export async function homeCommand(config?: string): Promise<string> {
         `Run \`cloudflare-axi pages\` for all ${projects.length} Pages projects`,
       );
     }
+  }
+
+  if (!Array.isArray(workers)) {
+    // Not swallowed as "0 Workers": that would read as an empty account.
+    const code = workers instanceof AxiError ? workers.code : "UNKNOWN";
+    blocks.push(`workers: could not list (${code})`);
+    hints.push(
+      "Run `cloudflare-axi workers list` to see why the account's Workers could not be listed",
+    );
+  } else if (workers.length === 0) {
+    blocks.push("workers: 0 Workers in this account");
+  } else {
+    blocks.push(
+      renderList(
+        "workers",
+        workers.slice(0, HOME_ROW_LIMIT).map((w) => ({
+          name: w.id,
+          modified: relativeTime(w.modified_on),
+        })),
+      ),
+    );
+    hints.push(
+      `Run \`cloudflare-axi workers list\` for ${
+        workers.length > HOME_ROW_LIMIT
+          ? `all ${workers.length} Workers`
+          : "each Worker"
+      } with its workers.dev URL, crons and routes`,
+    );
   }
 
   hints.push(

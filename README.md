@@ -53,9 +53,10 @@ pnpm add -g link:$PWD/cloudflare-axi   # puts `cloudflare-axi` on PATH
 ## Usage
 
 ```sh
-cloudflare-axi              # dashboard: this directory's Worker, or Pages projects
+cloudflare-axi              # dashboard: this directory's Worker, or the account's Pages projects and Workers
 cloudflare-axi deployments  # recent deployments of the Worker configured in cwd
 cloudflare-axi deployments --config ~/Projects/my-worker/wrangler.toml   # same, from any directory
+cloudflare-axi workers list                          # every Worker: workers.dev URL, crons, routes; plus the account's workers.dev subdomain
 cloudflare-axi workers deploy --dry-run              # bundle the Worker in cwd locally; nothing uploaded
 cloudflare-axi workers deploy --name <worker>        # real deploy; --name must match the config's Worker
 cloudflare-axi workers secret list [--name <worker>] # secret names and types (never values)
@@ -91,7 +92,8 @@ cloudflare-axi update       # self-update (built into axi-sdk-js)
 
 `--config <path>` works on every command that depends on a Worker's wrangler
 config: the dashboard (`cloudflare-axi --config <path>`), `deployments`, and
-all `workers` subcommands. It may come before or after the command. The path
+all `workers` subcommands (for `workers list` it only picks the account, from
+the config's `account_id`). It may come before or after the command. The path
 must exist (else `VALIDATION_ERROR`, exit 2); wrangler then runs from the
 config's directory, so relative `main`, a custom `build.command`, `.env` files
 and `.wrangler/` state resolve exactly as if you had run it there, with no

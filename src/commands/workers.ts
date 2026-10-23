@@ -19,8 +19,19 @@ import {
   wranglerConfigSuffix,
 } from "../config.js";
 import { cfGet } from "../api.js";
-import { AxiError, NOT_LINKED_SUGGESTIONS, stripAnsi } from "../errors.js";
-import { encode, renderHelp, renderList, renderOutput } from "../toon.js";
+import {
+  AxiError,
+  CloudflareApiError,
+  NOT_LINKED_SUGGESTIONS,
+  stripAnsi,
+} from "../errors.js";
+import {
+  encode,
+  relativeTime,
+  renderHelp,
+  renderList,
+  renderOutput,
+} from "../toon.js";
 import {
   wranglerExec,
   wranglerExecWithOutput,
@@ -30,9 +41,11 @@ import {
 import { resolveAccountId } from "../zones.js";
 
 export const WORKERS_HELP = `usage: cloudflare-axi workers [subcommand] [flags]
-Cloudflare Workers: deploy or delete a Worker and manage its secrets.
-subcommands[3]:
-  deploy, delete, secret put <KEY>|list|delete <KEY>
+Cloudflare Workers: list the account's Workers, deploy or delete a Worker and manage its secrets.
+subcommands[4]:
+  list, deploy, delete, secret put <KEY>|list|delete <KEY>
+flags{list}:
+  --config <path> (only picks the account: the config's account_id)
 flags{deploy}:
   --name <worker> (required unless --dry-run; must match the Worker the config deploys; never forwarded), --config <path>, --outdir <dir>, --dry-run
 flags{delete}:
@@ -40,6 +53,7 @@ flags{delete}:
 flags{secret}:
   --name <worker> (required for put and delete), --config <path>
 notes:
+  list is account-wide: every Worker with its workers.dev URL, crons and routes, plus the account's workers.dev subdomain (one per account, shared by all its Workers)
   deploy is directory-scoped like \`wrangler deploy\`: it deploys the wrangler config in cwd (or --config)
   --config <path> works from any directory: wrangler runs from the config's directory (relative --outdir still resolves against your cwd)
   a real deploy runs \`wrangler deploy --dry-run\` first and refuses when --name differs from the Worker name wrangler resolves
@@ -52,6 +66,7 @@ notes:
   recent deployments: \`cloudflare-axi deployments\`
   not wrapped yet: tail, secret bulk, --env; use \`wrangler\` for those
 examples:
+  cloudflare-axi workers list
   cloudflare-axi workers deploy --dry-run
   cloudflare-axi workers deploy --dry-run --config ~/Projects/family-haze-bot/wrangler.toml
   cloudflare-axi workers deploy --name family-haze-bot
@@ -62,6 +77,7 @@ examples:
 `;
 
 const USAGE = {
+  workersList: "cloudflare-axi workers list [--config <path>]",
   deploy:
     "cloudflare-axi workers deploy --name <worker> [--config <path>] [--outdir <dir>] [--dry-run]",
   put: 'printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name <worker> [--config <path>]',
@@ -626,11 +642,16 @@ export function parseDeletedSiteNamespaces(stdout: string): string[] {
 }
 
 /**
- * Account for the dependents check, resolved the way wrangler resolves the
- * one it deletes from: the applicable config's account_id, else
- * CLOUDFLARE_ACCOUNT_ID, else the token's sole account.
+ * Account for Workers REST calls, resolved the way wrangler resolves the one
+ * it acts on: the applicable config's account_id, else
+ * CLOUDFLARE_ACCOUNT_ID, else the token's sole account. `outcome` ends the
+ * message of an ambiguous-account error ("nothing deleted").
  */
-async function workersAccountId(config: string | undefined): Promise<string> {
+async function workersAccountId(
+  config: string | undefined,
+  outcome = "nothing deleted",
+  target = "the account that owns the Worker",
+): Promise<string> {
   const path = config ?? findWranglerConfig(process.cwd());
   const fromConfig = path === undefined ? undefined : configAccountId(path);
   if (fromConfig) return fromConfig;
@@ -638,8 +659,8 @@ async function workersAccountId(config: string | undefined): Promise<string> {
     return await resolveAccountId();
   } catch (error) {
     if (error instanceof AxiError && error.code === "VALIDATION_ERROR") {
-      throw new AxiError(`${error.message}; nothing deleted`, error.code, [
-        "Set account_id in the wrangler config, or CLOUDFLARE_ACCOUNT_ID=<id>, to the account that owns the Worker",
+      throw new AxiError(`${error.message}; ${outcome}`, error.code, [
+        `Set account_id in the wrangler config, or CLOUDFLARE_ACCOUNT_ID=<id>, to ${target}`,
       ]);
     }
     throw error;
@@ -865,9 +886,210 @@ async function runSecretDelete(
   ]);
 }
 
+// ---- list ----
+
+/** One row of `GET /accounts/{a}/workers/scripts` (the fields `workers list` uses). */
+export interface ApiWorkerScript {
+  id?: string;
+  modified_on?: string;
+  routes?: { pattern?: string }[] | null;
+}
+
+/** Per-Worker details read one by one; `undefined` means the read failed. */
+export interface WorkerDetails {
+  crons?: string[];
+  workersDev?: boolean;
+}
+
+/**
+ * GET /accounts/{a}/workers/subdomain answers code 10007 when the account
+ * has no workers.dev subdomain yet (wrangler 4.127.1 getWorkersDevSubdomain).
+ */
+const API_NO_SUBDOMAIN = 10007;
+
+/** Parallel per-Worker detail reads, to stay well under the API rate limit on large accounts. */
+const DETAIL_CONCURRENCY = 6;
+
+/**
+ * One `workers list` row. `subdomain` is the account's workers.dev
+ * subdomain ("acme" for acme.workers.dev), or null when none is registered.
+ */
+export function toWorkerRow(
+  script: ApiWorkerScript & { id: string },
+  subdomain: string | null,
+  details: WorkerDetails,
+): Record<string, unknown> {
+  const url =
+    details.workersDev === undefined
+      ? "unknown"
+      : !details.workersDev
+        ? "off"
+        : subdomain === null
+          ? "none (no account subdomain)"
+          : `https://${script.id}.${subdomain}.workers.dev`;
+  const routes = (script.routes ?? [])
+    .map((r) => r.pattern)
+    .filter((p): p is string => typeof p === "string" && p !== "");
+  return {
+    name: script.id,
+    url,
+    modified: relativeTime(script.modified_on),
+    crons:
+      details.crons === undefined
+        ? "unknown"
+        : details.crons.length > 0
+          ? details.crons.join("; ")
+          : "none",
+    routes: routes.length > 0 ? routes.join("; ") : "none",
+  };
+}
+
+/** Run `fn` over `items` with at most `limit` calls in flight, keeping order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return out;
+}
+
+/**
+ * The account's Workers, newest change first, from the REST API: wrangler
+ * has no command that lists them. Shared with the dashboard.
+ */
+export async function listWorkerScripts(config: string | undefined): Promise<{
+  account: string;
+  scripts: (ApiWorkerScript & { id: string })[];
+}> {
+  const account = await workersAccountId(
+    config,
+    "nothing listed",
+    "the account to list",
+  );
+  const scripts = (
+    (await cfGet<ApiWorkerScript[] | null>(
+      `/accounts/${account}/workers/scripts`,
+    )) ?? []
+  )
+    .filter((s): s is ApiWorkerScript & { id: string } => !!s.id)
+    .sort((a, b) => (b.modified_on ?? "").localeCompare(a.modified_on ?? ""));
+  return { account, scripts };
+}
+
+async function accountSubdomain(account: string): Promise<string | null> {
+  try {
+    const result = await cfGet<{ subdomain?: string } | null>(
+      `/accounts/${account}/workers/subdomain`,
+    );
+    return result?.subdomain || null;
+  } catch (error) {
+    if (
+      error instanceof CloudflareApiError &&
+      error.apiCodes.includes(API_NO_SUBDOMAIN)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function workerDetails(
+  account: string,
+  name: string,
+): Promise<{ details: WorkerDetails; error?: unknown }> {
+  const base = `/accounts/${account}/workers/scripts/${encodeURIComponent(name)}`;
+  const [schedules, subdomain] = await Promise.allSettled([
+    cfGet<{ schedules?: { cron?: string }[] } | null>(`${base}/schedules`),
+    cfGet<{ enabled?: boolean } | null>(`${base}/subdomain`),
+  ]);
+  const details: WorkerDetails = {};
+  if (schedules.status === "fulfilled") {
+    details.crons = (schedules.value?.schedules ?? [])
+      .map((s) => s.cron)
+      .filter((c): c is string => typeof c === "string" && c !== "");
+  }
+  if (subdomain.status === "fulfilled") {
+    details.workersDev = subdomain.value?.enabled === true;
+  }
+  const failed = [schedules, subdomain].find((r) => r.status === "rejected");
+  return failed?.status === "rejected"
+    ? { details, error: failed.reason }
+    : { details };
+}
+
+async function workersList(args: string[]): Promise<string> {
+  const config = takeConfig(args);
+  rejectExtraArgs("workers list", args, USAGE.workersList);
+  const suffix = configSuffix(config);
+
+  const { account, scripts } = await listWorkerScripts(config);
+  const subdomain = await accountSubdomain(account);
+  const subdomainLine =
+    subdomain === null
+      ? "subdomain: none registered (no Worker in this account has a workers.dev URL until one is set in the Cloudflare dashboard)"
+      : `subdomain: ${subdomain}.workers.dev`;
+
+  if (scripts.length === 0) {
+    return renderOutput([
+      `account: ${account}`,
+      subdomainLine,
+      "workers: 0 Workers in this account",
+      renderHelp([
+        "Run `cloudflare-axi workers deploy --dry-run` in a Worker's directory to check it before its first deploy",
+      ]),
+    ]);
+  }
+
+  const results = await mapLimit(scripts, DETAIL_CONCURRENCY, (s) =>
+    workerDetails(account, s.id),
+  );
+  const rows = scripts.map((s, i) =>
+    toWorkerRow(s, subdomain, results[i].details),
+  );
+  const failures = results.filter((r) => r.error !== undefined);
+  const firstError = failures[0]?.error;
+  const onWorkersDev = rows.filter(
+    (r) => typeof r.url === "string" && r.url.startsWith("https://"),
+  ).length;
+
+  return renderOutput([
+    `account: ${account}`,
+    subdomainLine,
+    `count: ${scripts.length} Workers`,
+    renderList("workers", rows),
+    renderHelp([
+      ...(failures.length > 0
+        ? [
+            `crons or url are unknown for ${failures.length} Workers: ${
+              firstError instanceof Error
+                ? firstError.message
+                : String(firstError)
+            }`,
+          ]
+        : []),
+      ...(subdomain !== null && onWorkersDev > 0
+        ? [
+            `The workers.dev subdomain is account-wide: changing ${subdomain}.workers.dev changes the URL of all ${onWorkersDev} Workers served on it`,
+          ]
+        : []),
+      'url "off" means the Worker is not served on workers.dev (routes or custom domains only)',
+      `Run \`cloudflare-axi workers secret list --name <worker>${suffix}\` to see a Worker's secrets`,
+    ]),
+  ]);
+}
+
 // ---- dispatch ----
 
-const SUBCOMMANDS = ["deploy", "delete", "secret"] as const;
+const SUBCOMMANDS = ["list", "deploy", "delete", "secret"] as const;
 const SECRET_SUBCOMMANDS = ["put", "list", "delete"] as const;
 
 async function secretCommand(args: string[]): Promise<string> {
@@ -907,6 +1129,7 @@ export async function workersCommand(args: string[]): Promise<string> {
     return renderOutput([
       WORKERS_HELP.trimEnd(),
       renderHelp([
+        "Run `cloudflare-axi workers list` for every Worker in the account",
         "Run `cloudflare-axi deployments` for recent deployments of the Worker in cwd",
       ]),
     ]);
@@ -923,6 +1146,8 @@ export async function workersCommand(args: string[]): Promise<string> {
   }
   rest.shift();
   switch (first as (typeof SUBCOMMANDS)[number]) {
+    case "list":
+      return workersList(rest);
     case "deploy":
       return deploy(rest);
     case "delete":

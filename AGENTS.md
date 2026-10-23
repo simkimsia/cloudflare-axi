@@ -80,8 +80,14 @@ the upstream `kunchenguid/axi` repo).
   `stdinSource` is the test seam), `workers delete` and
   `workers secret delete` (both prechecked read-only with
   `secret list --name`, so an unknown Worker or secret is NOT_FOUND with
-  nothing deleted). Bare `workers` prints its help and points at
-  `deployments`. A user's `--config` is carried, absolute and
+  nothing deleted). `workers list` is REST-only (wrangler has no command
+  that lists Workers): the scripts list and the account subdomain, then
+  per-Worker `schedules` and `subdomain` reads, at most 6 in flight, which
+  degrade to `unknown` with a help line rather than fail the list. Its
+  account comes from `workersAccountId`, shared with `delete`;
+  `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts
+  list only, a failure shown as `could not list (<code>)`). Bare `workers`
+  prints its help and points at `deployments`. A user's `--config` is carried, absolute and
   shell-quoted (`configSuffix` / `shellQuote` in `src/config.ts`), into every
   follow-up hint, including `workers` and `deployments` commands suggested by
   mapped wrangler errors (`carryConfig`). Without the ND-JSON `deploy` entry (or its
@@ -302,6 +308,14 @@ real on a throwaway project and delete it afterwards:
   are URL-encoded in the path. A missing key is 404 code 10009 ("get: 'key
   not found'" / "metadata: 'key not found'"), a missing namespace 404 code
   10013; a bad token 401 code 10000 (AUTH).
+- Workers list (from the Cloudflare API docs and wrangler 4.127.1 source;
+  not yet run live): `GET /accounts/{a}/workers/scripts` (Script objects:
+  `id` is the name, `modified_on`, `routes` [{id, pattern, script}] or null;
+  no crons or workers.dev flag), `GET /accounts/{a}/workers/subdomain`
+  (`{subdomain}`, the account-wide `<subdomain>.workers.dev`; code 10007
+  when none is registered), `.../workers/scripts/{name}/schedules`
+  (`{schedules: [{cron}]}`) and `.../workers/scripts/{name}/subdomain`
+  (`{enabled, previews_enabled}`).
 - `email dns` also resolves live DNS via `node:dns` to report `ok` /
   `missing` / `differs` per record; tests inject a fake resolver.
 
