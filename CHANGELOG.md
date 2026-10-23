@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.4](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.3...cloudflare-axi-v0.2.4) (2026-10-23)
+
+
+### Features
+
+* **workers:** add bounded workers tail with cron events ([e6a489c](https://github.com/simkimsia/cloudflare-axi/commit/e6a489ce38e201fa38f7d182fd93243eff1e484d)), closes [#37](https://github.com/simkimsia/cloudflare-axi/issues/37)
+* **workers:** add workers delete and workers secret delete ([834bf54](https://github.com/simkimsia/cloudflare-axi/commit/834bf54bdd79229885bb576b43e764f11f1159db)), closes [#47](https://github.com/simkimsia/cloudflare-axi/issues/47)
+* **workers:** add workers list with the account's workers.dev subdomain ([cde55cf](https://github.com/simkimsia/cloudflare-axi/commit/cde55cfd258f2c8f9aaf709d8db88434f7f6b2d0)), closes [#39](https://github.com/simkimsia/cloudflare-axi/issues/39)
+
+
+### Bug Fixes
+
+* **api:** time out REST calls so a hung API cannot stall the dashboard ([1c4726b](https://github.com/simkimsia/cloudflare-axi/commit/1c4726ba450afd30d2b8610576349d0c46628a6f)), closes [#58](https://github.com/simkimsia/cloudflare-axi/issues/58)
+* **workers:** make workers tail stop wrangler's whole process group ([2e0450d](https://github.com/simkimsia/cloudflare-axi/commit/2e0450d6dd5270188886839631afecf7ebf28479)), closes [#37](https://github.com/simkimsia/cloudflare-axi/issues/37)
+* **workers:** read the config's account_id with a TOML parser ([e47a92e](https://github.com/simkimsia/cloudflare-axi/commit/e47a92e1b3d688aaf6c84964745b531b2f8f8021)), closes [#47](https://github.com/simkimsia/cloudflare-axi/issues/47)
+
 ## [0.2.3](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.2...cloudflare-axi-v0.2.3) (2026-10-15)
 
 
