@@ -22,9 +22,8 @@ the upstream `kunchenguid/axi` repo).
   `wranglerBytes` for undecoded stdout with a 32 MiB buffer and a distinct
   `WranglerOutputTooLargeError`). `RunOptions.timeoutMs` (opt-in, read-only
   calls only: the dashboard's spawns, `whoami` and the credential refresh)
-  SIGTERMs wrangler, which forwards it to its CLI grandchild, SIGKILLs after
-  5s, and throws `WranglerTimeoutError` (UNKNOWN) without waiting for the
-  pipes to close. Non-zero exits route through
+  runs through `wranglerStream` and, on timeout, stops the whole process
+  group (see the `src/api.ts` entry below). Non-zero exits route through
   `mapWranglerError`; a missing binary maps to `WRANGLER_NOT_INSTALLED`.
   `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner. `run`
   always closes the child's stdin (writing `input` when given) so wrangler
