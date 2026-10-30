@@ -407,6 +407,25 @@ describe("workers tail", () => {
     expect(out).toContain("cron (scheduled) events");
   });
 
+  it("SIGKILLs the wrangler group on a second interrupt instead of leaving it running", async () => {
+    const calls = fakeSpawn({ chunks: [json(FETCH_EVENT)], ignoreTerm: true });
+    const promise = workersCommand(["tail", "--name", "family-haze-bot"]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    process.emit("SIGINT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls[0].groupKills).toEqual(["SIGTERM"]);
+    // Still listening: a second Ctrl-C must not fall to Node's default
+    // handler, which exits without killing the group.
+    expect(process.listenerCount("SIGINT")).toBeGreaterThan(0);
+    process.emit("SIGINT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls[0].groupKills).toEqual(["SIGTERM", "SIGKILL"]);
+    const out = await promise;
+    expect(out).toContain("stopped: interrupted");
+    expect(out).toContain("events[1]");
+    expect(process.listenerCount("SIGINT")).toBe(0);
+  });
+
   it("stops wrangler and still prints the events when this process is interrupted", async () => {
     const calls = fakeSpawn({ chunks: [json(FETCH_EVENT)] });
     const promise = workersCommand(["tail", "--name", "family-haze-bot"]);

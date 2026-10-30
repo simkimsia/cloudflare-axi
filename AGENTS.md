@@ -33,13 +33,14 @@ the upstream `kunchenguid/axi` repo).
   ND-JSON entries (`parseOutputEntries`) next to stdout. `wranglerStream`
   spawns a long-running command (`tail`) with stdin ignored, hands stdout
   chunks to a callback and is bounded by the caller's `stop()` (SIGTERM,
-  then SIGKILL after 5s). The `wrangler` bin is a wrapper whose CLI
+  then SIGKILL after 5s; `kill()` SIGKILLs at once). The `wrangler` bin is a wrapper whose CLI
   grandchild shares the pipes, so on POSIX the child is `detached` into its
   own process group and every signal goes to the group (`kill(-pid)`);
   after the child exits or SIGKILL is sent, the pipes are destroyed after
   2s, so `done` always settles. The group leaves the terminal's foreground
-  group, so the caller forwards Ctrl-C itself; the group is also SIGKILLed
-  when this process exits.
+  group, so the caller forwards Ctrl-C itself, keeping its signal listeners
+  (`on`, not `once`) until `done`: Node's default handler exits without the
+  `exit` event, so it would skip the group SIGKILL this process runs on exit.
 - `src/debug.ts` — `AXI_DEBUG=1` prints each wrangler argv (from `run` in
   `src/wrangler.ts`) and each REST method and path (from `cfRequest`) to
   stderr, with `CLOUDFLARE_API_TOKEN` masked. Never headers or bodies.
@@ -114,7 +115,7 @@ the upstream `kunchenguid/axi` repo).
 - `src/commands/workers-tail.ts` — `workers tail`: runs
   `wrangler tail [name] --format json` through `wranglerStream`, stopped at `--for` (default 60s,
   max 30m), `--max-events` (default 50) or SIGINT/SIGTERM/SIGHUP of this
-  process. Without `--name` it names the Worker from the config's top-level
+  process; a repeated signal calls `kill()`. It ends within `--for` + 7s. Without `--name` it names the Worker from the config's top-level
   `name` (`configWorkerName`), and a JSON-string fatal error wrangler prints
   on stdout (json mode) feeds the early-exit note.
   `JsonObjectStream` splits wrangler's concatenated indented JSON events;

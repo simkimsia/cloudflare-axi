@@ -297,6 +297,11 @@ export interface StreamHandle {
    * its tail on the server), then SIGKILL after `killAfterMs`. Idempotent.
    */
   stop(killAfterMs?: number): void;
+  /**
+   * SIGKILL the group now, skipping the grace period (a repeated Ctrl-C).
+   * `done` still settles, after at most STREAM_CLOSE_GRACE_MS. Idempotent.
+   */
+  kill(): void;
   done: Promise<StreamResult>;
 }
 
@@ -339,9 +344,11 @@ export function wranglerStream(
   let stderr = "";
   let settled = false;
   let stopping = false;
+  let killed = false;
   let exitInfo: { code: number | null; signal: string | null } | undefined;
   const timers: ReturnType<typeof setTimeout>[] = [];
   let stopHook: (killAfterMs: number) => void = () => undefined;
+  let killHook: () => void = () => undefined;
 
   const signal = (sig: NodeJS.Signals) => {
     if (group && child.pid !== undefined) {
@@ -413,12 +420,21 @@ export function wranglerStream(
         }, killAfterMs),
       );
     };
+    killHook = () => {
+      signal("SIGKILL");
+      timers.push(setTimeout(forceClose, STREAM_CLOSE_GRACE_MS));
+    };
   });
   return {
     stop(killAfterMs = STREAM_KILL_GRACE_MS) {
       if (settled || stopping) return;
       stopping = true;
       stopHook(killAfterMs);
+    },
+    kill() {
+      if (settled || killed) return;
+      killed = stopping = true;
+      killHook();
     },
     done,
   };
