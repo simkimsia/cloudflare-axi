@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.5](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.4...cloudflare-axi-v0.2.5) (2026-10-30)
+
+
+### Bug Fixes
+
+* show custom domains in workers list ([e869fba](https://github.com/simkimsia/cloudflare-axi/commit/e869fba1c311f418d12acdcc56ad9ca4093e92a1)), closes [#62](https://github.com/simkimsia/cloudflare-axi/issues/62)
+* time out the dashboard's and whoami's wrangler spawns ([#76](https://github.com/simkimsia/cloudflare-axi/issues/76)) ([b3e3832](https://github.com/simkimsia/cloudflare-axi/commit/b3e3832422509df2dcfebc59181952dbe4ab8ef6))
+* **update:** count only this package's package.json as a PATH copy's root ([351cb30](https://github.com/simkimsia/cloudflare-axi/commit/351cb305bcd71816a0ad68aa06e3f477ef808a9e))
+* **update:** detect a linked checkout and copies shadowed on PATH ([ca2b835](https://github.com/simkimsia/cloudflare-axi/commit/ca2b8358f7176ff7cc8f7c842d8510cffbad50c3)), closes [#56](https://github.com/simkimsia/cloudflare-axi/issues/56)
+* **update:** flag a shadowed copy even with one other copy on PATH ([148fdf3](https://github.com/simkimsia/cloudflare-axi/commit/148fdf3a7e58ab1e997c88605e0596548be6cce6))
+* **workers:** SIGKILL the wrangler group on a second Ctrl-C in workers tail ([#77](https://github.com/simkimsia/cloudflare-axi/issues/77)) ([24fa6ba](https://github.com/simkimsia/cloudflare-axi/commit/24fa6ba7c8e890b7efdcd9e3150f9b316d8563e8)), closes [#68](https://github.com/simkimsia/cloudflare-axi/issues/68)
+
 ## [0.2.4](https://github.com/simkimsia/cloudflare-axi/compare/cloudflare-axi-v0.2.3...cloudflare-axi-v0.2.4) (2026-10-23)
 
 
