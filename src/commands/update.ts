@@ -146,7 +146,7 @@ export function resolveBinTarget(path: string, deps: UpdateDeps): string {
 /** Every distinct `cloudflare-axi` on PATH, first (the one that runs) first. */
 export function findPathCopies(deps: UpdateDeps): PathCopy[] {
   const names =
-    deps.platform === "win32" ? [`${BIN}.cmd`, `${BIN}.ps1`, BIN] : [BIN];
+    deps.platform === "win32" ? [BIN, `${BIN}.cmd`, `${BIN}.ps1`] : [BIN];
   const pathVar = deps.env.PATH ?? deps.env.Path ?? "";
   const seen = new Set<string>();
   const copies: PathCopy[] = [];
@@ -204,6 +204,8 @@ export async function updateCommand(
   const entry = deps.invokedAs ? safeRealpath(deps, deps.invokedAs) : undefined;
   const linked = entry ? detectLinkedCheckout(entry, deps) : undefined;
   const copies = findPathCopies(deps);
+  const shadowed =
+    copies.length > 1 && entry !== undefined && copies[0].target !== entry;
   const sdkOptions = {
     stdout: deps.stdout,
     version: VERSION,
@@ -228,18 +230,13 @@ export async function updateCommand(
         install: "linked checkout",
         checkout: linked.path,
         branch: linked.branch,
-        ...(result?.available ? { action: "manual", run } : {}),
+        ...(result?.available && !shadowed ? { action: "manual", run } : {}),
       },
     };
-    if (result?.available) {
+    if (result?.available && !shadowed) {
       help.push(
         `This copy is linked to ${linked.path}; update that checkout (\`${run}\`) instead of \`npm install -g\`, which would not change the copy that runs`,
       );
-      if (linked.branch !== "main") {
-        help.push(
-          `Branch ${linked.branch} may not carry ${result.latest}; \`git -C ${shellQuote(linked.path)} switch main\` first`,
-        );
-      }
     }
   } else {
     const sdkOutput = await deps.runUpdate({
@@ -251,7 +248,14 @@ export async function updateCommand(
     } else {
       const { help: sdkHelp, ...restOutput } = sdkOutput;
       output = restOutput;
-      if (Array.isArray(sdkHelp)) help.push(...(sdkHelp as string[]));
+      if (!shadowed) {
+        if (Array.isArray(sdkHelp)) help.push(...(sdkHelp as string[]));
+      } else if (restOutput.update && typeof restOutput.update === "object") {
+        const update = { ...(restOutput.update as Record<string, unknown>) };
+        delete update.action;
+        delete update.run;
+        output.update = update;
+      }
     }
   }
 
@@ -266,14 +270,14 @@ export async function updateCommand(
     help.push(
       `${copies.length} copies of ${BIN} are on PATH; \`${BIN}\` runs ${winner.path} (${winner.version}). Remove the ones you do not use, or call a copy by its full path`,
     );
-    if (entry && winner.target !== entry) {
+    if (shadowed) {
       help.push(
         `This copy is not the one \`${BIN}\` runs, so updating it does not change what \`${BIN}\` runs`,
       );
       const winnerLinked = detectLinkedCheckout(winner.target, deps);
       if (winnerLinked) {
         help.push(
-          `${winner.path} is linked to ${winnerLinked.path} (branch ${winnerLinked.branch}); update it with \`${rebuildCommand(winnerLinked.path)}\`, or remove the link with \`pnpm rm -g @simkimsia/cloudflare-axi\``,
+          `${winner.path} is linked to ${winnerLinked.path} (branch ${winnerLinked.branch}); update it with \`${rebuildCommand(winnerLinked.path)}\``,
         );
       }
     }
