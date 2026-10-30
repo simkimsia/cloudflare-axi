@@ -98,8 +98,8 @@ the upstream `kunchenguid/axi` repo).
   custom domains (one account-wide `workers/domains` read, since custom
   domains are not in the scripts' `routes`), then per-Worker `schedules`
   and `subdomain` reads, at most 6 requests in flight (3 Workers at a
-  time). Failed domain or detail reads degrade to `unknown` with a help line rather than fail the list. Its
-  account comes from `workersAccountId`, shared with `delete`;
+  time). Failed domain or detail reads degrade to `unknown` with a help
+  line rather than fail the list. Its account comes from `workersAccountId`, shared with `delete`;
   `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts
   list only; see README.md for request timeout behavior). Bare `workers`
   prints its help and points at `deployments`. A user's `--config` is carried, absolute and
