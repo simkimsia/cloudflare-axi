@@ -321,6 +321,38 @@ describe("update", () => {
     expect(out).toMatch(/cloudflare-axi,0\.2\.1,yes,yes/);
   });
 
+  it("keeps the SDK's upgrade hint when the PATH copy is a shim it cannot follow", async () => {
+    // asdf's shim re-execs through asdf, so it names no JS entry.
+    const shims = "/Users/jane/.asdf/shims";
+    const fx = issueMachine({
+      invokedAs: NPM_ENTRY,
+      path: [shims],
+      latest: "9.9.9",
+    });
+    fx.files[`${shims}/cloudflare-axi`] =
+      '#!/usr/bin/env bash\nexec /opt/asdf/bin/asdf exec "cloudflare-axi" "$@"\n';
+    const { deps } = makeDeps(fx);
+    const out = await updateCommand(["--check"], deps);
+    expect(out).toContain("Run `cloudflare-axi update` to upgrade");
+    expect(out).not.toContain("does not change what");
+  });
+
+  it("marks a copy it cannot identify as unknown, not as another copy", async () => {
+    const shims = "/Users/jane/.asdf/shims";
+    const fx = issueMachine({
+      invokedAs: NPM_ENTRY,
+      path: [shims, `${NPM_ROOT}/bin`],
+      latest: "9.9.9",
+    });
+    fx.files[`${shims}/cloudflare-axi`] =
+      '#!/usr/bin/env bash\nexec /opt/asdf/bin/asdf exec "cloudflare-axi" "$@"\n';
+    const { deps } = makeDeps(fx);
+    const out = await updateCommand(["--check"], deps);
+    expect(out).not.toContain("does not change what");
+    expect(out).toMatch(/shims\/cloudflare-axi,unknown,yes,unknown/);
+    expect(out).toMatch(/bin\/cloudflare-axi,0\.2\.3,no \(shadowed\),yes/);
+  });
+
   it("rejects unknown flags with VALIDATION_ERROR", async () => {
     const { deps, calls } = makeDeps(issueMachine());
     await expect(updateCommand(["--force"], deps)).rejects.toMatchObject({

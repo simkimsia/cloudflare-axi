@@ -212,13 +212,18 @@ export async function updateCommand(
   // Compare package roots, not entry files: `tsx bin/cloudflare-axi.ts` in a
   // checkout is the same copy as the link running its dist/ build.
   const root = entry ? packageRoot(entry, deps) : undefined;
-  const isThis = (copy: PathCopy) =>
-    root !== undefined && packageRoot(copy.target, deps) === root;
+  // A copy whose shim cannot be followed (Volta, asdf, mise) is unknown,
+  // never counted as a different copy.
+  const isThis = (copy: PathCopy): "yes" | "no" | "unknown" => {
+    if (root === undefined) return "unknown";
+    const copyRoot = packageRoot(copy.target, deps);
+    if (copyRoot === undefined) return "unknown";
+    return copyRoot === root ? "yes" : "no";
+  };
   // Even with a single copy on PATH, the running one may not be it (a clone
   // run by path, npx, a project-local bin): updating it changes nothing that
   // `cloudflare-axi` runs.
-  const shadowed =
-    copies.length > 0 && entry !== undefined && !isThis(copies[0]);
+  const shadowed = copies.length > 0 && isThis(copies[0]) === "no";
   const sdkOptions = {
     stdout: deps.stdout,
     version: VERSION,
@@ -277,7 +282,7 @@ export async function updateCommand(
       bin: copy.path,
       version: copy.version,
       runs: index === 0 ? "yes" : "no (shadowed)",
-      this: isThis(copy) ? "yes" : "no",
+      this: isThis(copy),
     }));
     help.push(
       `${copies.length} copies of ${BIN} are on PATH; \`${BIN}\` runs ${copies[0].path} (${copies[0].version}). Remove the ones you do not use, or call a copy by its full path`,
