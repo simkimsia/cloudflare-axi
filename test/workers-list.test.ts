@@ -9,7 +9,11 @@ vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 import { execFile } from "node:child_process";
 import { shellQuote } from "../src/config.js";
 import { HOME_WORKERS_TIMEOUT_MS, homeCommand } from "../src/commands/home.js";
-import { toWorkerRow, workersCommand } from "../src/commands/workers.js";
+import {
+  domainsByWorker,
+  toWorkerRow,
+  workersCommand,
+} from "../src/commands/workers.js";
 import { failure, fakeWrangler } from "./fake-wrangler.js";
 
 const ok = (result: unknown) =>
@@ -50,9 +54,23 @@ const SCRIPTS = [
   },
 ];
 
+// Shape of GET /accounts/{a}/workers/domains (Cloudflare API docs: Domain
+// objects with id, hostname, service, environment, zone_id, zone_name).
+const DOMAINS = [
+  {
+    id: "d1",
+    hostname: "gate.example.com",
+    service: "access-gate",
+    environment: "production",
+    zone_id: "z1",
+    zone_name: "example.com",
+  },
+];
+
 interface StubOptions {
   scripts?: unknown;
   subdomain?: () => Response;
+  domains?: () => Response;
   schedules?: Record<string, string[]>;
   workersDev?: Record<string, boolean>;
   failDetails?: string[];
@@ -75,6 +93,8 @@ function stubApi(opts: StubOptions = {}) {
         return opts.subdomain
           ? opts.subdomain()
           : ok({ subdomain: "llm-powered-job-watch" });
+      if (path === `/accounts/${account}/workers/domains`)
+        return opts.domains ? opts.domains() : ok(DOMAINS);
       const m = /\/workers\/scripts\/([^/]+)\/(schedules|subdomain)$/.exec(
         path,
       );
@@ -124,13 +144,31 @@ describe("toWorkerRow", () => {
 
   it("builds the workers.dev URL from the account subdomain", () => {
     expect(
-      toWorkerRow(script, "acme", { crons: ["*/5 * * * *"], workersDev: true }),
+      toWorkerRow(
+        script,
+        "acme",
+        { crons: ["*/5 * * * *"], workersDev: true },
+        ["bot.example.com"],
+      ),
     ).toEqual({
       name: "bot",
       url: "https://bot.acme.workers.dev",
       modified: "3d ago",
       crons: "*/5 * * * *",
       routes: "a.com/*; b.com/*",
+      domains: "bot.example.com",
+    });
+  });
+
+  it("lists custom domains, none, or unknown when they could not be read", () => {
+    expect(
+      toWorkerRow({ id: "x" }, "acme", {}, ["b.com", "a.com"]),
+    ).toMatchObject({ domains: "b.com; a.com" });
+    expect(toWorkerRow({ id: "x" }, "acme", {}, [])).toMatchObject({
+      domains: "none",
+    });
+    expect(toWorkerRow({ id: "x" }, "acme", {})).toMatchObject({
+      domains: "unknown",
     });
   });
 
@@ -149,6 +187,23 @@ describe("toWorkerRow", () => {
   });
 });
 
+describe("domainsByWorker", () => {
+  it("groups hostnames by Worker, sorted, skipping incomplete entries", () => {
+    const map = domainsByWorker([
+      { hostname: "z.example.com", service: "a" },
+      { hostname: "b.example.com", service: "a" },
+      { hostname: "c.example.com", service: "b" },
+      { hostname: "", service: "a" },
+      { hostname: "x.example.com" },
+    ]);
+    expect([...map.entries()]).toEqual([
+      ["a", ["b.example.com", "z.example.com"]],
+      ["b", ["c.example.com"]],
+    ]);
+    expect(domainsByWorker(null).size).toBe(0);
+  });
+});
+
 describe("workers list", () => {
   it("lists every Worker newest first with url, crons and routes, over REST only", async () => {
     const calls = fakeWrangler(() => ({}));
@@ -158,19 +213,22 @@ describe("workers list", () => {
     });
     const out = await workersCommand(["list"]);
     expect(calls).toHaveLength(0);
-    expect(paths.slice(0, 2)).toEqual([
+    expect(paths.slice(0, 3)).toEqual([
       "/accounts/acc/workers/scripts",
       "/accounts/acc/workers/subdomain",
+      "/accounts/acc/workers/domains",
     ]);
     expect(paths).toContain(
       "/accounts/acc/workers/scripts/family-haze-bot/schedules",
     );
     expect(paths).toContain("/accounts/acc/workers/scripts/api/subdomain");
-    expect(paths).toHaveLength(2 + 2 * SCRIPTS.length);
+    expect(paths).toHaveLength(3 + 2 * SCRIPTS.length);
     expect(out).toContain("account: acc");
     expect(out).toContain("subdomain: llm-powered-job-watch.workers.dev");
     expect(out).toContain("count: 3 Workers");
-    expect(out).toContain("workers[3]{name,url,modified,crons,routes}:");
+    expect(out).toContain(
+      "workers[3]{name,url,modified,crons,routes,domains}:",
+    );
     const rows = out.split("\n").filter((l) => /^ {2}\S+,/.test(l));
     expect(rows.map((l) => l.trim().split(",")[0])).toEqual([
       "family-haze-bot",
@@ -178,15 +236,44 @@ describe("workers list", () => {
       "old-router",
     ]);
     expect(out).toContain(
-      'family-haze-bot,"https://family-haze-bot.llm-powered-job-watch.workers.dev",2d ago,*/5 * * * *; 15 9 * * *,none',
+      'family-haze-bot,"https://family-haze-bot.llm-powered-job-watch.workers.dev",2d ago,*/5 * * * *; 15 9 * * *,none,none',
     );
     expect(out).toContain(
-      "api,off,10d ago,none,example.com/api/*; www.example.com/api/*",
+      "api,off,10d ago,none,example.com/api/*; www.example.com/api/*,none",
     );
     expect(out).toContain(
       "changing llm-powered-job-watch.workers.dev changes the URL of all 2 Workers served on it",
     );
     expect(out).not.toContain("unknown");
+  });
+
+  it("shows a Worker served only on a custom domain (#62)", async () => {
+    fakeWrangler(() => ({}));
+    const paths = stubApi({
+      scripts: [{ id: "access-gate", modified_on: ago(120), routes: null }],
+      workersDev: { "access-gate": false },
+    });
+    const out = await workersCommand(["list"]);
+    expect(out).toContain("access-gate,off,4mo ago,none,none,gate.example.com");
+    // One account-wide domains request, not one per Worker.
+    expect(paths.filter((p) => p.endsWith("/workers/domains"))).toEqual([
+      "/accounts/acc/workers/domains",
+    ]);
+  });
+
+  it("says domains are unknown, and why, when the domain list cannot be read", async () => {
+    fakeWrangler(() => ({}));
+    stubApi({
+      domains: () => apiError(429, 971, "Please wait and consider throttling"),
+      workersDev: { api: false },
+    });
+    const out = await workersCommand(["list"]);
+    expect(out).toContain(
+      "api,off,10d ago,none,example.com/api/*; www.example.com/api/*,unknown",
+    );
+    expect(out).toContain("custom domains are unknown: ");
+    expect(out).toContain("rate limited");
+    expect(out).toContain("count: 3 Workers");
   });
 
   it("reports an account with no workers.dev subdomain (code 10007) instead of failing", async () => {
@@ -216,7 +303,7 @@ describe("workers list", () => {
     const out = await workersCommand(["list"]);
     expect(out).toContain("workers: 0 Workers in this account");
     expect(out).toContain("subdomain: llm-powered-job-watch.workers.dev");
-    expect(paths).toHaveLength(2);
+    expect(paths).toHaveLength(3);
   });
 
   it("fails on an auth error from the scripts list", async () => {
@@ -292,7 +379,7 @@ describe("workers list", () => {
     );
     const out = await workersCommand(["list"]);
     expect(out).toContain("count: 10 Workers");
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2 + 2 * scripts.length);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3 + 2 * scripts.length);
     expect(peak).toBe(6);
   });
 

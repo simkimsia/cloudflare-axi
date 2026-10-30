@@ -56,7 +56,7 @@ flags{tail}:
 flags{secret}:
   --name <worker> (required for put and delete), --config <path>
 notes:
-  list is account-wide: every Worker with its workers.dev URL, crons and routes, plus the account's workers.dev subdomain (one per account, shared by all its Workers)
+  list is account-wide: every Worker with its workers.dev URL, crons, routes and custom domains, plus the account's workers.dev subdomain (one per account, shared by all its Workers)
   deploy is directory-scoped like \`wrangler deploy\`: it deploys the wrangler config in cwd (or --config)
   --config <path> works from any directory: wrangler runs from the config's directory (relative --outdir still resolves against your cwd)
   a real deploy runs \`wrangler deploy --dry-run\` first and refuses when --name differs from the Worker name wrangler resolves
@@ -901,6 +901,12 @@ export interface ApiWorkerScript {
   routes?: { pattern?: string }[] | null;
 }
 
+/** One row of `GET /accounts/{a}/workers/domains` (the fields `workers list` uses). */
+interface ApiWorkerDomain {
+  hostname?: string;
+  service?: string;
+}
+
 /** Per-Worker details read one by one; `undefined` means the read failed. */
 export interface WorkerDetails {
   crons?: string[];
@@ -922,11 +928,14 @@ const DETAIL_CONCURRENCY = 3;
 /**
  * One `workers list` row. `subdomain` is the account's workers.dev
  * subdomain ("acme" for acme.workers.dev), or null when none is registered.
+ * `domains` are the Worker's custom domains, or undefined when the
+ * account's custom domain list could not be read.
  */
 export function toWorkerRow(
   script: ApiWorkerScript & { id: string },
   subdomain: string | null,
   details: WorkerDetails,
+  domains?: string[],
 ): Record<string, unknown> {
   const url =
     details.workersDev === undefined
@@ -950,7 +959,30 @@ export function toWorkerRow(
           ? details.crons.join("; ")
           : "none",
     routes: routes.length > 0 ? routes.join("; ") : "none",
+    domains:
+      domains === undefined
+        ? "unknown"
+        : domains.length > 0
+          ? domains.join("; ")
+          : "none",
   };
+}
+
+/**
+ * Custom domains by Worker name, from one account-wide
+ * `GET /accounts/{a}/workers/domains` (the scripts list leaves them out:
+ * they are not zone routes). Sorted per Worker for a stable row.
+ */
+export function domainsByWorker(
+  domains: ApiWorkerDomain[] | null,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const d of domains ?? []) {
+    if (!d.service || !d.hostname) continue;
+    out.set(d.service, [...(out.get(d.service) ?? []), d.hostname]);
+  }
+  for (const hosts of out.values()) hosts.sort();
+  return out;
 }
 
 /** Run `fn` over `items` with at most `limit` calls in flight, keeping order. */
@@ -1017,6 +1049,26 @@ async function accountSubdomain(account: string): Promise<string | null> {
   }
 }
 
+/**
+ * The account's custom domains by Worker, in one request for all Workers.
+ * A failed read degrades to `byWorker: undefined` (domains "unknown").
+ */
+async function accountDomains(
+  account: string,
+): Promise<{ byWorker?: Map<string, string[]>; error?: unknown }> {
+  try {
+    return {
+      byWorker: domainsByWorker(
+        await cfGet<ApiWorkerDomain[] | null>(
+          `/accounts/${account}/workers/domains`,
+        ),
+      ),
+    };
+  } catch (error) {
+    return { error };
+  }
+}
+
 async function workerDetails(
   account: string,
   name: string,
@@ -1047,7 +1099,10 @@ async function workersList(args: string[]): Promise<string> {
   const suffix = configSuffix(config);
 
   const { account, scripts } = await listWorkerScripts(config);
-  const subdomain = await accountSubdomain(account);
+  const [subdomain, domains] = await Promise.all([
+    accountSubdomain(account),
+    accountDomains(account),
+  ]);
   const subdomainLine =
     subdomain === null
       ? "subdomain: none registered (no Worker in this account has a workers.dev URL until one is set in the Cloudflare dashboard)"
@@ -1068,7 +1123,12 @@ async function workersList(args: string[]): Promise<string> {
     workerDetails(account, s.id),
   );
   const rows = scripts.map((s, i) =>
-    toWorkerRow(s, subdomain, results[i].details),
+    toWorkerRow(
+      s,
+      subdomain,
+      results[i].details,
+      domains.byWorker && (domains.byWorker.get(s.id) ?? []),
+    ),
   );
   const failures = results.filter((r) => r.error !== undefined);
   const firstError = failures[0]?.error;
@@ -1091,12 +1151,21 @@ async function workersList(args: string[]): Promise<string> {
             }`,
           ]
         : []),
+      ...(domains.byWorker === undefined
+        ? [
+            `custom domains are unknown: ${
+              domains.error instanceof Error
+                ? domains.error.message
+                : String(domains.error)
+            }`,
+          ]
+        : []),
       ...(subdomain !== null && onWorkersDev > 0
         ? [
             `The workers.dev subdomain is account-wide: changing ${subdomain}.workers.dev changes the URL of all ${onWorkersDev} Workers served on it`,
           ]
         : []),
-      'url "off" means the Worker is not served on workers.dev (routes or custom domains only)',
+      'url "off" means the Worker is not served on workers.dev (only on its routes or custom domains, if any)',
       `Run \`cloudflare-axi workers secret list --name <worker>${suffix}\` to see a Worker's secrets`,
     ]),
   ]);

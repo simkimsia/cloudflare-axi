@@ -94,9 +94,11 @@ the upstream `kunchenguid/axi` repo).
   `workers secret delete` (both prechecked read-only with
   `secret list --name`, so an unknown Worker or secret is NOT_FOUND with
   nothing deleted). `workers list` is REST-only (wrangler has no command
-  that lists Workers): the scripts list and the account subdomain, then
-  per-Worker `schedules` and `subdomain` reads, at most 6 requests in flight (3 Workers at a time), which
-  degrade to `unknown` with a help line rather than fail the list. Its
+  that lists Workers): the scripts list, the account subdomain and its
+  custom domains (one account-wide `workers/domains` read, since custom
+  domains are not in the scripts' `routes`), then per-Worker `schedules`
+  and `subdomain` reads, at most 6 requests in flight (3 Workers at a
+  time). Failed domain or detail reads degrade to `unknown` with a help line rather than fail the list. Its
   account comes from `workersAccountId`, shared with `delete`;
   `listWorkerScripts` also feeds the dashboard's `workers[n]` block (scripts
   list only; see README.md for request timeout behavior). Bare `workers`
@@ -349,7 +351,9 @@ real on a throwaway project and delete it afterwards:
   (`{subdomain}`, the account-wide `<subdomain>.workers.dev`; code 10007
   when none is registered), `.../workers/scripts/{name}/schedules`
   (`{schedules: [{cron}]}`) and `.../workers/scripts/{name}/subdomain`
-  (`{enabled, previews_enabled}`).
+  (`{enabled, previews_enabled}`). `GET /accounts/{a}/workers/domains`
+  with no filter lists every custom domain (`hostname`, `service`,
+  `environment`, `zone_name`); a filtered read was checked live in #62.
 - `email dns` also resolves live DNS via `node:dns` to report `ok` /
   `missing` / `differs` per record; tests inject a fake resolver.
 

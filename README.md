@@ -55,7 +55,7 @@ pnpm add -g link:$PWD/cloudflare-axi   # puts `cloudflare-axi` on PATH
 cloudflare-axi              # dashboard: this directory's Worker, or the account's Pages projects and Workers
 cloudflare-axi deployments  # recent deployments of the Worker configured in cwd
 cloudflare-axi deployments --config ~/Projects/my-worker/wrangler.toml   # same, from any directory
-cloudflare-axi workers list                          # every Worker: workers.dev URL, crons, routes; plus the account's workers.dev subdomain
+cloudflare-axi workers list                          # every Worker: workers.dev URL, crons, routes, custom domains; plus the account's workers.dev subdomain
 cloudflare-axi workers deploy --dry-run              # bundle the Worker in cwd locally; nothing uploaded
 cloudflare-axi workers deploy --name <worker>        # real deploy; --name must match the config's Worker
 cloudflare-axi workers secret list [--name <worker>] # secret names and types (never values)
