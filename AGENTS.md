@@ -20,7 +20,11 @@ the upstream `kunchenguid/axi` repo).
 - `src/wrangler.ts` — sole place that spawns the `wrangler` binary
   (`wranglerJson` / `wranglerExec`, both taking optional `{ input, env, cwd }`;
   `wranglerBytes` for undecoded stdout with a 32 MiB buffer and a distinct
-  `WranglerOutputTooLargeError`). Non-zero exits route through
+  `WranglerOutputTooLargeError`). `RunOptions.timeoutMs` (opt-in, read-only
+  calls only: the dashboard's spawns, `whoami` and the credential refresh)
+  SIGTERMs wrangler, which forwards it to its CLI grandchild, SIGKILLs after
+  5s, and throws `WranglerTimeoutError` (UNKNOWN) without waiting for the
+  pipes to close. Non-zero exits route through
   `mapWranglerError`; a missing binary maps to `WRANGLER_NOT_INSTALLED`.
   `extractJson` tolerates the "⛅️ wrangler x.y.z" stdout banner. `run`
   always closes the child's stdin (writing `input` when given) so wrangler
@@ -50,8 +54,8 @@ the upstream `kunchenguid/axi` repo).
   wrangler has no subcommand for (VISION.md: wrangler first). Every request,
   body read included, runs under `AbortSignal.timeout` (`API_TIMEOUT_MS` 30s,
   `API_BYTES_TIMEOUT_MS` 120s for `cfGetBytes`, or a caller's `timeoutMs`); a
-  timeout is an UNKNOWN "did not answer within Ns". Wrangler spawns have no
-  timeout yet. API failures
+  timeout is an UNKNOWN "did not answer within Ns" whose hint, for a write,
+  says to check state before retrying. API failures
   map through `mapApiError` in `src/errors.ts` (numeric codes, not stderr
   text) into the same AxiError codes, as a `CloudflareApiError` that keeps
   `apiCodes` for callers that branch on them.

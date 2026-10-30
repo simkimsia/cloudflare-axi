@@ -4,6 +4,7 @@ import {
   API_TIMEOUT_MS,
   cfGet,
   cfGetBytes,
+  cfRequest,
 } from "../src/api.js";
 import { AxiError, mapApiError, REPORT_SUGGESTION } from "../src/errors.js";
 
@@ -121,6 +122,25 @@ describe("REST request timeout", () => {
       `within ${API_TIMEOUT_MS / 1000}s`,
     );
     expect(timeout).toHaveBeenLastCalledWith(API_TIMEOUT_MS);
+  });
+
+  it("tells a timed-out write to check state before retrying", async () => {
+    hangingFetch();
+    const read = await cfGet("/accounts", { timeoutMs: 20 }).catch(
+      (e: unknown) => e,
+    );
+    expect((read as AxiError).suggestions[0]).toBe("Retry");
+    const write = await cfRequest(
+      "PUT",
+      "/x/rules/1",
+      {},
+      {
+        timeoutMs: 20,
+      },
+    ).catch((e: unknown) => e);
+    expect((write as AxiError).suggestions[0]).toBe(
+      "The PUT may still have been applied: check the current state before retrying",
+    );
   });
 
   it("gives raw-body reads a longer default budget", async () => {
