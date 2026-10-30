@@ -289,6 +289,38 @@ describe("update", () => {
     expect(out).not.toContain("copies");
   });
 
+  it("gives no rebuild hint for an unlinked clone when PATH holds one other copy", async () => {
+    // A clone run by path while the only PATH copy is the npm install.
+    const { deps } = makeDeps(
+      issueMachine({
+        invokedAs: CHECKOUT_ENTRY,
+        path: [`${NPM_ROOT}/bin`],
+        latest: "9.9.9",
+      }),
+    );
+    const out = await updateCommand([], deps);
+    expect(out).not.toContain("action: manual");
+    expect(out).not.toContain("pull --ff-only");
+    expect(out).toContain(
+      `not the one \`cloudflare-axi\` runs (${NPM_ROOT}/bin/cloudflare-axi, 0.2.3)`,
+    );
+    expect(out).not.toContain("copies of cloudflare-axi");
+  });
+
+  it("treats the checkout's own source entry as the linked copy that runs", async () => {
+    // `tsx bin/cloudflare-axi.ts` in the checkout the PATH link points at.
+    const fx = issueMachine({
+      invokedAs: `${CHECKOUT}/bin/cloudflare-axi.ts`,
+      latest: "9.9.9",
+    });
+    fx.files[`${CHECKOUT}/bin/cloudflare-axi.ts`] = "";
+    const { deps } = makeDeps(fx);
+    const out = await updateCommand([], deps);
+    expect(out).toContain("action: manual");
+    expect(out).not.toContain("does not change what");
+    expect(out).toMatch(/cloudflare-axi,0\.2\.1,yes,yes/);
+  });
+
   it("rejects unknown flags with VALIDATION_ERROR", async () => {
     const { deps, calls } = makeDeps(issueMachine());
     await expect(updateCommand(["--force"], deps)).rejects.toMatchObject({
