@@ -172,6 +172,11 @@ export function findPathCopies(deps: UpdateDeps): PathCopy[] {
   return copies;
 }
 
+function packageRoot(path: string, deps: UpdateDeps): string | undefined {
+  const { packageJsonPath } = readNearestPackageJson(path, deps);
+  return packageJsonPath ? dirname(packageJsonPath) : undefined;
+}
+
 function rebuildCommand(checkout: string): string {
   const dir = shellQuote(checkout);
   return `git -C ${dir} pull --ff-only && pnpm -C ${dir} install && pnpm -C ${dir} run build`;
@@ -204,8 +209,16 @@ export async function updateCommand(
   const entry = deps.invokedAs ? safeRealpath(deps, deps.invokedAs) : undefined;
   const linked = entry ? detectLinkedCheckout(entry, deps) : undefined;
   const copies = findPathCopies(deps);
+  // Compare package roots, not entry files: `tsx bin/cloudflare-axi.ts` in a
+  // checkout is the same copy as the link running its dist/ build.
+  const root = entry ? packageRoot(entry, deps) : undefined;
+  const isThis = (copy: PathCopy) =>
+    root !== undefined && packageRoot(copy.target, deps) === root;
+  // Even with a single copy on PATH, the running one may not be it (a clone
+  // run by path, npx, a project-local bin): updating it changes nothing that
+  // `cloudflare-axi` runs.
   const shadowed =
-    copies.length > 1 && entry !== undefined && copies[0].target !== entry;
+    copies.length > 0 && entry !== undefined && !isThis(copies[0]);
   const sdkOptions = {
     stdout: deps.stdout,
     version: VERSION,
@@ -264,22 +277,22 @@ export async function updateCommand(
       bin: copy.path,
       version: copy.version,
       runs: index === 0 ? "yes" : "no (shadowed)",
-      this: entry !== undefined && copy.target === entry ? "yes" : "no",
+      this: isThis(copy) ? "yes" : "no",
     }));
+    help.push(
+      `${copies.length} copies of ${BIN} are on PATH; \`${BIN}\` runs ${copies[0].path} (${copies[0].version}). Remove the ones you do not use, or call a copy by its full path`,
+    );
+  }
+  if (shadowed) {
     const winner = copies[0];
     help.push(
-      `${copies.length} copies of ${BIN} are on PATH; \`${BIN}\` runs ${winner.path} (${winner.version}). Remove the ones you do not use, or call a copy by its full path`,
+      `This copy is not the one \`${BIN}\` runs (${winner.path}, ${winner.version}), so updating it does not change what \`${BIN}\` runs`,
     );
-    if (shadowed) {
+    const winnerLinked = detectLinkedCheckout(winner.target, deps);
+    if (winnerLinked) {
       help.push(
-        `This copy is not the one \`${BIN}\` runs, so updating it does not change what \`${BIN}\` runs`,
+        `${winner.path} is linked to ${winnerLinked.path} (branch ${winnerLinked.branch}); update it with \`${rebuildCommand(winnerLinked.path)}\``,
       );
-      const winnerLinked = detectLinkedCheckout(winner.target, deps);
-      if (winnerLinked) {
-        help.push(
-          `${winner.path} is linked to ${winnerLinked.path} (branch ${winnerLinked.branch}); update it with \`${rebuildCommand(winnerLinked.path)}\``,
-        );
-      }
     }
   }
 
