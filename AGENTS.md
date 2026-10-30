@@ -293,8 +293,15 @@ the upstream `kunchenguid/axi` repo).
   invocation). Not yet run live through the wrapper.
 - The SDK routes `<command> <sub> --help` to `getCommandHelp(<command>)`, so
   one help text per top-level command covers all its subcommands.
-- The SDK ships `update` as a reserved built-in, so `cloudflare-axi update`
-  works with no code here; the npm package name resolves from `package.json`.
+- The SDK ships `update` as a reserved built-in; `src/commands/update.ts`
+  shadows it (#56, upstream kunchenguid/axi#254) and delegates to the SDK's
+  `runUpdate` except for a linked checkout (package root has `.git` and is
+  outside node_modules, e.g. `pnpm link --global`), which the SDK reports as
+  an unknown install and would advise `npm install -g` for: there it only
+  checks and names the checkout, branch and git pull + build. It also lists
+  every `cloudflare-axi` on PATH (following npm symlinks and pnpm shell shims
+  to their entry) and warns which one runs. Drop the shadow once the SDK
+  handles both.
 
 ## Live smoke procedure for Pages writes
 
