@@ -353,6 +353,26 @@ describe("update", () => {
     expect(out).toMatch(/bin\/cloudflare-axi,0\.2\.3,no \(shadowed\),yes/);
   });
 
+  it("ignores an unrelated package.json above an unfollowable shim", async () => {
+    // `npm init -y` in the home directory sits above ~/.asdf/shims.
+    const shims = "/Users/jane/.asdf/shims";
+    const fx = issueMachine({
+      invokedAs: NPM_ENTRY,
+      path: [shims, `${NPM_ROOT}/bin`],
+      latest: "9.9.9",
+    });
+    fx.files[`${shims}/cloudflare-axi`] =
+      '#!/usr/bin/env bash\nexec /opt/asdf/bin/asdf exec "cloudflare-axi" "$@"\n';
+    fx.files["/Users/jane/package.json"] = JSON.stringify({
+      name: "jane",
+      version: "1.0.0",
+    });
+    const { deps } = makeDeps(fx);
+    const out = await updateCommand(["--check"], deps);
+    expect(out).not.toContain("does not change what");
+    expect(out).toMatch(/shims\/cloudflare-axi,unknown,yes,unknown/);
+  });
+
   it("rejects unknown flags with VALIDATION_ERROR", async () => {
     const { deps, calls } = makeDeps(issueMachine());
     await expect(updateCommand(["--force"], deps)).rejects.toMatchObject({
