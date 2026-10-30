@@ -4,17 +4,26 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the spawn layer: these tests never run the real wrangler binary.
-vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+vi.mock("node:child_process", () => ({ execFile: vi.fn(), spawn: vi.fn() }));
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { shellQuote } from "../src/config.js";
-import { HOME_WORKERS_TIMEOUT_MS, homeCommand } from "../src/commands/home.js";
+import {
+  HOME_WORKERS_TIMEOUT_MS,
+  HOME_WRANGLER_TIMEOUT_MS,
+  homeCommand,
+} from "../src/commands/home.js";
 import {
   domainsByWorker,
   toWorkerRow,
   workersCommand,
 } from "../src/commands/workers.js";
-import { failure, fakeWrangler } from "./fake-wrangler.js";
+import {
+  failure,
+  fakeWrangler,
+  fakeWranglerSpawn,
+  type SpawnReply,
+} from "./fake-wrangler.js";
 
 const ok = (result: unknown) =>
   new Response(
@@ -133,6 +142,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.mocked(execFile).mockReset();
+  vi.mocked(spawn).mockReset();
 });
 
 describe("toWorkerRow", () => {
@@ -400,14 +410,17 @@ describe("dashboard workers block", () => {
       "Last Modified": "1 day ago",
     },
   ]);
-  const wrangler = () =>
-    fakeWrangler((args) =>
-      args[0] === "pages"
-        ? { stdout: PAGES }
-        : {
-            stderr: "You need to provide a name for your Worker",
-            exitCode: 1,
-          },
+  // The dashboard's wrangler spawns are bounded, so they go through spawn.
+  const wrangler = (overrides: Record<string, SpawnReply> = {}) =>
+    fakeWranglerSpawn(
+      (args) =>
+        overrides[args[0]] ??
+        (args[0] === "pages"
+          ? { stdout: PAGES }
+          : {
+              stderr: "You need to provide a name for your Worker",
+              exitCode: 1,
+            }),
     );
 
   it("shows the account's Workers next to the Pages projects", async () => {
@@ -471,5 +484,82 @@ describe("dashboard workers block", () => {
     expect(HOME_WORKERS_TIMEOUT_MS).toBe(10_000);
     expect(out).toContain("workers: could not list (UNKNOWN)");
     expect(out).toContain("projects[1]");
+  });
+
+  it("bounds both wrangler spawns and says Pages could not be listed on a hang", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const calls = wrangler({ pages: { hang: true } });
+      stubApi();
+      const pending = homeCommand();
+      await vi.advanceTimersByTimeAsync(HOME_WRANGLER_TIMEOUT_MS);
+      const out = await pending;
+      expect(HOME_WRANGLER_TIMEOUT_MS).toBe(20_000);
+      expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+        ["deployments", "list"],
+        ["pages", "project"],
+      ]);
+      expect(calls[1].groupKills).toEqual(["SIGTERM"]);
+      // A timeout is not an empty account.
+      expect(out).toContain("projects: could not list (UNKNOWN)");
+      expect(out).not.toContain("0 Pages projects");
+      expect(out).toContain("Run `cloudflare-axi pages` to see why");
+      expect(out).toContain("workers[3]{name,modified}:");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the account view when deployments list hangs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const calls = wrangler({ deployments: { hang: true } });
+      stubApi();
+      const pending = homeCommand();
+      await vi.advanceTimersByTimeAsync(HOME_WRANGLER_TIMEOUT_MS);
+      const out = await pending;
+      expect(calls[0].groupKills).toEqual(["SIGTERM"]);
+      expect(out).toContain(
+        "worker: unknown (wrangler deployments list did not answer within 20s)",
+      );
+      expect(out).toContain("cloudflare-axi deployments");
+      expect(out).toContain("projects[1]");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a hung deployments list under --config instead of falling back", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const config = join(dir, "wrangler.toml");
+      writeFileSync(config, 'name = "w"\n');
+      const calls = wrangler({ deployments: { hang: true } });
+      const pending = failure(homeCommand(config));
+      await vi.advanceTimersByTimeAsync(HOME_WRANGLER_TIMEOUT_MS);
+      const err = await pending;
+      expect(err.code).toBe("UNKNOWN");
+      expect(err.message).toBe(
+        "wrangler deployments list did not answer within 20s",
+      );
+      expect(calls[0].cwd).toBe(dir);
+      expect(calls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says Pages could not be listed when wrangler fails, rather than 0 projects", async () => {
+    wrangler({
+      pages: {
+        stderr:
+          "✘ [ERROR] A request to the Cloudflare API failed.\n  Authentication error [code: 10000]",
+        exitCode: 1,
+      },
+    });
+    stubApi();
+    const out = await homeCommand();
+    expect(out).toContain("projects: could not list (AUTH)");
+    expect(out).not.toContain("0 Pages projects");
   });
 });

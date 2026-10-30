@@ -113,16 +113,18 @@ JSON requests and raw KV value reads have separate budgets, both including
 the response body. The dashboard uses a shorter per-request budget from
 [`src/commands/home.ts`](src/commands/home.ts) for account lookup and Workers
 listing; a timeout renders `workers: could not list (UNKNOWN)`. A timed-out
-write (POST/PUT/DELETE) may still have been applied, so its error says to check
-the current state before retrying.
+write (Email Routing `POST`/`PUT`/`DELETE`) may still have been applied, so
+its hint says to check the current state before retrying.
 
-The dashboard's `wrangler deployments list` and `wrangler pages project list`
-are bounded too (`HOME_WRANGLER_TIMEOUT_MS`); a hung one renders
-`worker: unknown (...)` or `projects: could not list (...)` instead of stalling.
-`whoami` and the `wrangler whoami` that refreshes an expired OAuth token use
-`WRANGLER_READ_TIMEOUT_MS` from [`src/wrangler.ts`](src/wrangler.ts). These
-are per-call limits, not a deadline for the whole command, and other wrangler
-calls (deploys and other writes above all) are never cut off.
+The dashboard's own `wrangler` calls (`deployments list`, `pages project
+list`) each get a budget from [`src/commands/home.ts`](src/commands/home.ts);
+a hung one renders `worker: unknown (...)` or `projects: could not list
+(UNKNOWN)`, and under `--config` a hung `deployments list` is an `UNKNOWN`
+error. `whoami` and the `wrangler whoami` that refreshes an expired OAuth
+token before REST calls use `WRANGLER_READ_TIMEOUT_MS` from
+[`src/wrangler.ts`](src/wrangler.ts). These are per-call limits, not a
+deadline for the whole command. Other `wrangler` commands (deploys, writes,
+`pages`, `kv`, `deployments`) are not bounded.
 
 Example output (TOON):
 

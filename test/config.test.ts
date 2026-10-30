@@ -5,11 +5,11 @@ import { decode } from "@toon-format/toon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the spawn layer: these tests never run the real wrangler binary.
-vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+vi.mock("node:child_process", () => ({ execFile: vi.fn(), spawn: vi.fn() }));
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { liftLeadingConfig, main } from "../src/cli.js";
-import { fakeWrangler } from "./fake-wrangler.js";
+import { fakeWrangler, fakeWranglerSpawn } from "./fake-wrangler.js";
 
 // Global `--config <path>` for directory-scoped commands (issue #38), driven
 // end to end through the real CLI entry (`main`) with wrangler faked.
@@ -47,6 +47,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.mocked(execFile).mockReset();
+  vi.mocked(spawn).mockReset();
   process.exitCode = undefined;
 });
 
@@ -159,8 +160,9 @@ describe("deployments --config", () => {
 });
 
 describe("dashboard --config", () => {
+  // The dashboard bounds its wrangler spawns, so they go through spawn.
   it("shows the Worker from the config and threads --config into the hints", async () => {
-    const calls = fakeWrangler(() => ({ stdout: DEPLOYMENTS_JSON }));
+    const calls = fakeWranglerSpawn(() => ({ stdout: DEPLOYMENTS_JSON }));
     const { out, code } = await run(["--config", config]);
     expect(code).toBe(0);
     expect(calls).toHaveLength(1);
@@ -177,7 +179,10 @@ describe("dashboard --config", () => {
   });
 
   it("reports a failing --config Worker instead of falling back to Pages", async () => {
-    const calls = fakeWrangler(() => ({ stderr: NO_NAME_STDERR, exitCode: 1 }));
+    const calls = fakeWranglerSpawn(() => ({
+      stderr: NO_NAME_STDERR,
+      exitCode: 1,
+    }));
     const { out, code } = await run([`--config=${config}`]);
     expect(code).toBe(1);
     expect(out).toContain("NOT_LINKED");

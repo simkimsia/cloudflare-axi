@@ -124,23 +124,28 @@ describe("REST request timeout", () => {
     expect(timeout).toHaveBeenLastCalledWith(API_TIMEOUT_MS);
   });
 
-  it("tells a timed-out write to check state before retrying", async () => {
+  it("says a timed-out write may have gone through instead of a bare Retry", async () => {
     hangingFetch();
-    const read = await cfGet("/accounts", { timeoutMs: 20 }).catch(
+    const read = (await cfGet("/accounts", { timeoutMs: 20 }).catch(
       (e: unknown) => e,
-    );
-    expect((read as AxiError).suggestions[0]).toBe("Retry");
-    const write = await cfRequest(
-      "PUT",
-      "/x/rules/1",
-      {},
-      {
-        timeoutMs: 20,
-      },
-    ).catch((e: unknown) => e);
-    expect((write as AxiError).suggestions[0]).toBe(
-      "The PUT may still have been applied: check the current state before retrying",
-    );
+    )) as AxiError;
+    expect(read.suggestions[0]).toMatch(/^Retry;/);
+
+    for (const method of ["POST", "PUT", "DELETE"] as const) {
+      const write = (await cfRequest(
+        method,
+        "/zones/z/email/routing/rules",
+        {},
+        {
+          timeoutMs: 20,
+        },
+      ).catch((e: unknown) => e)) as AxiError;
+      expect(write.code).toBe("UNKNOWN");
+      expect(write.suggestions[0]).toContain(
+        `The ${method} may have gone through: check the current state`,
+      );
+      expect(write.suggestions[0]).not.toMatch(/^Retry/);
+    }
   });
 
   it("gives raw-body reads a longer default budget", async () => {

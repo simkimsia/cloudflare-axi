@@ -32,9 +32,10 @@ export interface RunOptions {
    */
   cwd?: string;
   /**
-   * Give up after this many ms: wrangler gets SIGTERM (SIGKILL after
-   * RUN_KILL_GRACE_MS) and the call throws WranglerTimeoutError. Only for
-   * read-only calls; a write is never cut off mid-way.
+   * Give up after this many ms with an UNKNOWN "did not answer" error. The
+   * child then runs in its own process group (see `wranglerStream`), so the
+   * stop reaches wrangler's CLI grandchild too. Bounded runs have no stdin,
+   * so `input` cannot be combined with it.
    */
   timeoutMs?: number;
 }
@@ -45,35 +46,101 @@ export interface RunOptions {
  */
 export const WRANGLER_READ_TIMEOUT_MS = 30_000;
 
-/** After a timeout's SIGTERM, how long before SIGKILL. */
-export const RUN_KILL_GRACE_MS = 5000;
+interface RunResult extends ExecResult {
+  /** Set (to `timeoutMs`) when a bounded run was stopped at its deadline. */
+  timedOutMs?: number;
+}
 
-/** wrangler did not finish within the caller's `timeoutMs`. */
+/** SIGTERM-to-SIGKILL grace when a bounded run hits its timeout. */
+export const BOUNDED_KILL_GRACE_MS = 2000;
+
+/** `wrangler pages project list`, without flags or values, for messages. */
+function commandName(args: string[]): string {
+  const words: string[] = [];
+  for (const arg of args) {
+    if (arg.startsWith("-")) break;
+    words.push(arg);
+  }
+  return ["wrangler", ...words].join(" ");
+}
+
+/** A bounded wrangler run hit its `timeoutMs`; callers can add context. */
 export class WranglerTimeoutError extends AxiError {
-  constructor(args: string[], timeoutMs: number) {
-    // Name the subcommand only (argv up to the first flag), never values.
-    const command = ["wrangler", ...args]
-      .slice(0, args.findIndex((a) => a.startsWith("-")) + 1 || undefined)
-      .join(" ");
+  constructor(args: string[], timeoutMs: number, suggestions: string[] = []) {
+    const command = commandName(args);
     super(`${command} did not answer within ${timeoutMs / 1000}s`, "UNKNOWN", [
-      "Retry; if it keeps timing out, run it with AXI_DEBUG=1 and check https://www.cloudflarestatus.com",
+      `Retry; if it keeps timing out, run \`${command}\` directly to see where it stalls, and check network access to api.cloudflare.com`,
+      ...suggestions,
     ]);
   }
 }
 
-type RunResult = ExecResult & { timedOut?: boolean };
+/**
+ * `run` with a deadline, built on `wranglerStream` so a timeout stops the
+ * whole process group (SIGTERM, SIGKILL after BOUNDED_KILL_GRACE_MS) and the
+ * result settles even if a straggler holds the pipes. The group is not the
+ * terminal's foreground group, so a SIGINT/SIGTERM/SIGHUP of this process is
+ * forwarded to wrangler and then re-raised so this process still exits.
+ */
+async function runBounded(
+  args: string[],
+  opts: RunOptions & { timeoutMs: number },
+): Promise<RunResult> {
+  if (opts.input !== undefined) {
+    throw new Error("a bounded wrangler run cannot take stdin input");
+  }
+  let stdout = "";
+  let timedOut = false;
+  let tooLarge = false;
+  const handle = wranglerStream(args, {
+    env: opts.env,
+    cwd: opts.cwd,
+    onStdout: (chunk) => {
+      if (tooLarge) return;
+      stdout += chunk;
+      if (stdout.length > MAX_BUFFER_BYTES) {
+        tooLarge = true;
+        handle.stop(BOUNDED_KILL_GRACE_MS);
+      }
+    },
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    handle.stop(BOUNDED_KILL_GRACE_MS);
+  }, opts.timeoutMs);
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const forward = (sig: NodeJS.Signals) => {
+    handle.stop(BOUNDED_KILL_GRACE_MS);
+    for (const s of signals) process.removeListener(s, forward);
+    // Every listener for this signal has already run, so unless someone else
+    // handles it, the re-raised signal ends this process as it would have.
+    process.kill(process.pid, sig);
+  };
+  for (const sig of signals) process.once(sig, forward);
+  try {
+    const result = await handle.done;
+    if (result.notInstalled) {
+      return { stdout: "", stderr: "ENOENT", exitCode: 127 };
+    }
+    if (tooLarge) throw new WranglerOutputTooLargeError(MAX_BUFFER_BYTES);
+    return {
+      stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode ?? 1,
+      ...(timedOut ? { timedOutMs: opts.timeoutMs } : {}),
+    };
+  } finally {
+    clearTimeout(timer);
+    for (const sig of signals) process.removeListener(sig, forward);
+  }
+}
 
 function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  if (opts.timeoutMs !== undefined) {
+    return runBounded(args, { ...opts, timeoutMs: opts.timeoutMs });
+  }
   debugWrangler(args, opts.cwd);
   return new Promise((resolve) => {
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const settle = (result: RunResult) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolve(result);
-    };
     const child = execFile(
       "wrangler",
       args,
@@ -84,13 +151,13 @@ function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
       },
       (error, stdout, stderr) => {
         if (error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-          settle({ stdout: "", stderr: "ENOENT", exitCode: 127 });
+          resolve({ stdout: "", stderr: "ENOENT", exitCode: 127 });
           return;
         }
         const exitCode = error
           ? ((error as Error & { code?: string | number }).code ?? 1)
           : 0;
-        settle({
+        resolve({
           stdout: stdout ?? "",
           stderr: stderr ?? "",
           exitCode: typeof exitCode === "number" ? exitCode : 1,
@@ -101,32 +168,13 @@ function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
     // secret value from a non-TTY stdin), and pass `input` when given.
     child?.stdin?.on("error", () => {});
     child?.stdin?.end(opts.input ?? "");
-    if (opts.timeoutMs !== undefined && child) {
-      timer = setTimeout(() => {
-        // The wrangler bin forwards SIGTERM to its CLI grandchild, which
-        // shares our pipes; don't wait for them to close, return now.
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) {
-            child.kill("SIGKILL");
-          }
-        }, RUN_KILL_GRACE_MS).unref();
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        settle({ stdout: "", stderr: "", exitCode: 1, timedOut: true });
-      }, opts.timeoutMs);
-    }
   });
 }
 
 /** Shared failure handling for wranglerJson / wranglerExec. */
-function checkResult(
-  args: string[],
-  result: RunResult,
-  opts: RunOptions | undefined,
-): void {
-  if (result.timedOut) {
-    throw new WranglerTimeoutError(args, opts?.timeoutMs ?? 0);
+function checkResult(args: string[], result: RunResult): void {
+  if (result.timedOutMs !== undefined) {
+    throw new WranglerTimeoutError(args, result.timedOutMs);
   }
   if (result.stderr === "ENOENT") throw wranglerNotInstalledError();
   if (result.exitCode !== 0) {
@@ -150,7 +198,7 @@ export async function wranglerJson<T = unknown>(
   opts?: RunOptions,
 ): Promise<T> {
   const result = await run(args, opts);
-  checkResult(args, result, opts);
+  checkResult(args, result);
   try {
     return JSON.parse(extractJson(result.stdout)) as T;
   } catch {
@@ -168,7 +216,7 @@ export async function wranglerExec(
   opts?: RunOptions,
 ): Promise<string> {
   const result = await run(args, opts);
-  checkResult(args, result, opts);
+  checkResult(args, result);
   return result.stdout;
 }
 

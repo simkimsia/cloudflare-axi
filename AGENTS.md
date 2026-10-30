@@ -54,8 +54,16 @@ the upstream `kunchenguid/axi` repo).
   wrangler has no subcommand for (VISION.md: wrangler first). Every request,
   body read included, runs under `AbortSignal.timeout` (`API_TIMEOUT_MS` 30s,
   `API_BYTES_TIMEOUT_MS` 120s for `cfGetBytes`, or a caller's `timeoutMs`); a
-  timeout is an UNKNOWN "did not answer within Ns" whose hint, for a write,
-  says to check state before retrying. API failures
+  timeout is an UNKNOWN "did not answer within Ns"; for a POST/PUT/DELETE
+  the hint says the write may have gone through, so check state before
+  retrying. Wrangler spawns are unbounded unless the caller passes
+  `timeoutMs` in `RunOptions`: that run goes through `wranglerStream` (own
+  process group; SIGTERM, then SIGKILL after `BOUNDED_KILL_GRACE_MS`; no
+  stdin, so no `input`), forwards SIGINT/SIGTERM/SIGHUP to the group and
+  re-raises them, and throws `WranglerTimeoutError` (UNKNOWN). Only the
+  dashboard (`HOME_WRANGLER_TIMEOUT_MS`) and `whoami`, including the OAuth
+  refresh (`WRANGLER_READ_TIMEOUT_MS`), pass one; deploys and other writes
+  stay unbounded. Their tests fake `spawn` (`fakeWranglerSpawn`). API failures
   map through `mapApiError` in `src/errors.ts` (numeric codes, not stderr
   text) into the same AxiError codes, as a `CloudflareApiError` that keeps
   `apiCodes` for callers that branch on them.

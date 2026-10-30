@@ -129,15 +129,16 @@ async function send<R>(
     return { response, data: await read(response) };
   } catch (error) {
     if (signal.aborted || isTimeout(error)) {
+      // A write that timed out may still have been applied server-side.
+      const retry =
+        method === "GET"
+          ? "Retry"
+          : `The ${method} may have gone through: check the current state with the matching read command before retrying`;
       throw new AxiError(
         `The Cloudflare API did not answer within ${timeoutMs / 1000}s (${method} ${path})`,
         "UNKNOWN",
         [
-          // A write may have gone through before the answer was lost.
-          method === "GET"
-            ? "Retry"
-            : `The ${method} may still have been applied: check the current state before retrying`,
-          "If it keeps timing out, check https://www.cloudflarestatus.com and network access to api.cloudflare.com",
+          `${retry}; if it keeps timing out, check https://www.cloudflarestatus.com and network access to api.cloudflare.com`,
         ],
       );
     }

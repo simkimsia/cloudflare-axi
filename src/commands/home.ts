@@ -17,8 +17,8 @@ export const HOME_WORKERS_TIMEOUT_MS = 10_000;
 
 /**
  * Budget for each wrangler spawn on the dashboard (`deployments list`,
- * `pages project list`), so a hung wrangler cannot stall bare
- * `cloudflare-axi`.
+ * `pages project list`). Longer than the REST one: it includes wrangler's own
+ * start-up, and it may page through the API.
  */
 export const HOME_WRANGLER_TIMEOUT_MS = 20_000;
 
@@ -30,15 +30,14 @@ export const HOME_WRANGLER_TIMEOUT_MS = 20_000;
 export async function homeCommand(config?: string): Promise<string> {
   // Content first (AXI §8): show the Worker configured in this directory if
   // there is one, otherwise the account's Pages projects — never a usage manual.
+  const bounded = { timeoutMs: HOME_WRANGLER_TIMEOUT_MS };
   let deploymentsTimedOut = false;
   const deployments = config
-    ? await listDeployments(config, HOME_WRANGLER_TIMEOUT_MS)
-    : await listDeployments(undefined, HOME_WRANGLER_TIMEOUT_MS).catch(
-        (error: unknown) => {
-          deploymentsTimedOut = error instanceof WranglerTimeoutError;
-          return undefined;
-        },
-      );
+    ? await listDeployments(config, bounded)
+    : await listDeployments(undefined, bounded).catch((error: unknown) => {
+        deploymentsTimedOut = error instanceof WranglerTimeoutError;
+        return undefined;
+      });
 
   if (deployments) {
     const rows = toDeploymentRows([...deployments].reverse()).slice(
@@ -58,9 +57,10 @@ export async function homeCommand(config?: string): Promise<string> {
   }
 
   const [projects, workers] = await Promise.all([
-    wranglerJson<PagesProjectRow[]>(["pages", "project", "list", "--json"], {
-      timeoutMs: HOME_WRANGLER_TIMEOUT_MS,
-    }).catch((error: unknown) => error),
+    wranglerJson<PagesProjectRow[]>(
+      ["pages", "project", "list", "--json"],
+      bounded,
+    ).catch((error: unknown) => error),
     listWorkerScripts(undefined, {
       timeoutMs: HOME_WORKERS_TIMEOUT_MS,
     }).then(
@@ -83,15 +83,12 @@ export async function homeCommand(config?: string): Promise<string> {
   }
 
   if (!Array.isArray(projects)) {
-    // Only a timeout is reported; other failures keep the old quiet fallback.
-    if (projects instanceof WranglerTimeoutError) {
-      blocks.push(
-        `projects: could not list (wrangler did not answer within ${HOME_WRANGLER_TIMEOUT_MS / 1000}s)`,
-      );
-      hints.push("Run `cloudflare-axi pages` to retry the Pages project list");
-    } else {
-      blocks.push("projects: 0 Pages projects found in this account");
-    }
+    // Same as the Workers block: a failed or timed-out listing is not "0".
+    const code = projects instanceof AxiError ? projects.code : "UNKNOWN";
+    blocks.push(`projects: could not list (${code})`);
+    hints.push(
+      "Run `cloudflare-axi pages` to see why the account's Pages projects could not be listed",
+    );
   } else if (projects.length === 0) {
     blocks.push("projects: 0 Pages projects found in this account");
   } else {

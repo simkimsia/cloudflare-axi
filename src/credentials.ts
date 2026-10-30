@@ -2,7 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AxiError, notAuthenticatedError } from "./errors.js";
-import { WRANGLER_READ_TIMEOUT_MS, wranglerExec } from "./wrangler.js";
+import {
+  WRANGLER_READ_TIMEOUT_MS,
+  WranglerTimeoutError,
+  wranglerExec,
+} from "./wrangler.js";
 
 /**
  * Credentials for direct Cloudflare REST API calls (surfaces wrangler does not
@@ -101,7 +105,17 @@ export async function resolveApiCredentials(): Promise<ApiCredentials> {
   if (isTokenExpired(config.expirationTime)) {
     // wrangler refreshes an expired access token on any authenticated call
     // and rewrites its config file; `whoami` is the cheapest such call.
-    await wranglerExec(["whoami"], { timeoutMs: WRANGLER_READ_TIMEOUT_MS });
+    await wranglerExec(["whoami"], {
+      timeoutMs: WRANGLER_READ_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      if (error instanceof WranglerTimeoutError) {
+        throw new WranglerTimeoutError(["whoami"], WRANGLER_READ_TIMEOUT_MS, [
+          `wrangler was refreshing the expired OAuth token in ${path}`,
+          "Or set CLOUDFLARE_API_TOKEN, which needs no refresh",
+        ]);
+      }
+      throw error;
+    });
     config = parseWranglerConfig(readFileSync(path, "utf8"));
     if (!config.oauthToken || isTokenExpired(config.expirationTime)) {
       throw expiredTokenError(path);
