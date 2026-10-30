@@ -62,7 +62,7 @@ cloudflare-axi workers secret list [--name <worker>] # secret names and types (n
 printf %s "$VALUE" | cloudflare-axi workers secret put <KEY> --name <worker>   # value on stdin only
 cloudflare-axi workers secret delete <KEY> --name <worker>  # exact name; NOT_FOUND deletes nothing
 cloudflare-axi workers delete --name <worker>        # irreversible; refuses a Worker others depend on unless --force
-cloudflare-axi workers tail --name <worker> [--for 60s] [--max-events 50] [--status error] [--cron]   # bounded live logs, then a count
+cloudflare-axi workers tail --name <worker> [--for 60s] [--max-events 50] [--status error] [--cron]   # live logs, then a count; ends within --for + 7s (Ctrl-C stops early, twice stops at once)
 cloudflare-axi pages        # all Pages projects in your account
 cloudflare-axi pages create <name> [--production-branch main]
 cloudflare-axi pages deploy <dir> --project <name> [--branch main]   # default branch main = production

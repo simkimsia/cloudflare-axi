@@ -399,15 +399,25 @@ export async function workersTail(args: string[]): Promise<string> {
     handle.stop();
   }, seconds * 1000);
   // If the caller interrupts or kills this process, stop wrangler too (so no
-  // orphaned tail keeps running) and still print what arrived.
+  // orphaned tail keeps running) and still print what arrived. A repeated
+  // signal SIGKILLs the group at once instead of waiting out the grace.
+  // The listeners stay until `done`: with `once`, a second Ctrl-C would hit
+  // Node's default handler, which exits without the `exit` event and so
+  // leaves the wrangler group running.
+  let interrupted = false;
   const interrupt = () => {
     stopReason ??= "interrupted";
+    if (interrupted) {
+      handle.kill();
+      return;
+    }
+    interrupted = true;
     handle.stop();
   };
   // wrangler runs in its own process group, so a terminal Ctrl-C reaches
   // only this process: forward it from here.
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-  for (const sig of signals) process.once(sig, interrupt);
+  for (const sig of signals) process.on(sig, interrupt);
   const started = Date.now();
   const result = await handle.done;
   clearTimeout(timer);
