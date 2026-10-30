@@ -20,6 +20,7 @@ examples:
 `;
 
 const BIN = "cloudflare-axi";
+const PACKAGE_NAME = "@simkimsia/cloudflare-axi";
 const USAGE = "usage: cloudflare-axi update [--check]";
 
 type AxiRenderable = Awaited<ReturnType<typeof runUpdate>>;
@@ -90,9 +91,8 @@ export function detectLinkedCheckout(
   entry: string,
   deps: UpdateDeps,
 ): LinkedCheckout | undefined {
-  const { packageJsonPath } = readNearestPackageJson(entry, deps);
-  if (!packageJsonPath) return undefined;
-  const root = dirname(packageJsonPath);
+  const root = packageRoot(entry, deps);
+  if (!root) return undefined;
   if (root.replaceAll("\\", "/").split("/").includes("node_modules")) {
     return undefined;
   }
@@ -166,15 +166,26 @@ export function findPathCopies(deps: UpdateDeps): PathCopy[] {
     copies.push({
       path: found,
       target,
-      version: readNearestPackageJson(target, deps).version ?? "unknown",
+      version: ownPackage(target, deps)?.version ?? "unknown",
     });
   }
   return copies;
 }
 
+/**
+ * The cloudflare-axi package a path belongs to. The nearest named
+ * package.json above an unfollowable shim can be any project's (a stray
+ * `~/package.json`), so only this package's own name counts.
+ */
+function ownPackage(path: string, deps: UpdateDeps) {
+  const found = readNearestPackageJson(path, deps);
+  return found.packageName === PACKAGE_NAME && found.packageJsonPath
+    ? { root: dirname(found.packageJsonPath), version: found.version }
+    : undefined;
+}
+
 function packageRoot(path: string, deps: UpdateDeps): string | undefined {
-  const { packageJsonPath } = readNearestPackageJson(path, deps);
-  return packageJsonPath ? dirname(packageJsonPath) : undefined;
+  return ownPackage(path, deps)?.root;
 }
 
 function rebuildCommand(checkout: string): string {
