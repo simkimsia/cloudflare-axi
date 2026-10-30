@@ -31,11 +31,49 @@ export interface RunOptions {
    * runs set it to the config's directory; see src/config.ts.
    */
   cwd?: string;
+  /**
+   * Give up after this many ms: wrangler gets SIGTERM (SIGKILL after
+   * RUN_KILL_GRACE_MS) and the call throws WranglerTimeoutError. Only for
+   * read-only calls; a write is never cut off mid-way.
+   */
+  timeoutMs?: number;
 }
 
-function run(args: string[], opts: RunOptions = {}): Promise<ExecResult> {
+/**
+ * Budget for quick read-only wrangler calls (`whoami`, including the one that
+ * refreshes an expired OAuth token), in line with the REST API_TIMEOUT_MS.
+ */
+export const WRANGLER_READ_TIMEOUT_MS = 30_000;
+
+/** After a timeout's SIGTERM, how long before SIGKILL. */
+export const RUN_KILL_GRACE_MS = 5000;
+
+/** wrangler did not finish within the caller's `timeoutMs`. */
+export class WranglerTimeoutError extends AxiError {
+  constructor(args: string[], timeoutMs: number) {
+    // Name the subcommand only (argv up to the first flag), never values.
+    const command = ["wrangler", ...args]
+      .slice(0, args.findIndex((a) => a.startsWith("-")) + 1 || undefined)
+      .join(" ");
+    super(`${command} did not answer within ${timeoutMs / 1000}s`, "UNKNOWN", [
+      "Retry; if it keeps timing out, run it with AXI_DEBUG=1 and check https://www.cloudflarestatus.com",
+    ]);
+  }
+}
+
+type RunResult = ExecResult & { timedOut?: boolean };
+
+function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
   debugWrangler(args, opts.cwd);
   return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (result: RunResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    };
     const child = execFile(
       "wrangler",
       args,
@@ -46,13 +84,13 @@ function run(args: string[], opts: RunOptions = {}): Promise<ExecResult> {
       },
       (error, stdout, stderr) => {
         if (error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-          resolve({ stdout: "", stderr: "ENOENT", exitCode: 127 });
+          settle({ stdout: "", stderr: "ENOENT", exitCode: 127 });
           return;
         }
         const exitCode = error
           ? ((error as Error & { code?: string | number }).code ?? 1)
           : 0;
-        resolve({
+        settle({
           stdout: stdout ?? "",
           stderr: stderr ?? "",
           exitCode: typeof exitCode === "number" ? exitCode : 1,
@@ -63,7 +101,37 @@ function run(args: string[], opts: RunOptions = {}): Promise<ExecResult> {
     // secret value from a non-TTY stdin), and pass `input` when given.
     child?.stdin?.on("error", () => {});
     child?.stdin?.end(opts.input ?? "");
+    if (opts.timeoutMs !== undefined && child) {
+      timer = setTimeout(() => {
+        // The wrangler bin forwards SIGTERM to its CLI grandchild, which
+        // shares our pipes; don't wait for them to close, return now.
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+          }
+        }, RUN_KILL_GRACE_MS).unref();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle({ stdout: "", stderr: "", exitCode: 1, timedOut: true });
+      }, opts.timeoutMs);
+    }
   });
+}
+
+/** Shared failure handling for wranglerJson / wranglerExec. */
+function checkResult(
+  args: string[],
+  result: RunResult,
+  opts: RunOptions | undefined,
+): void {
+  if (result.timedOut) {
+    throw new WranglerTimeoutError(args, opts?.timeoutMs ?? 0);
+  }
+  if (result.stderr === "ENOENT") throw wranglerNotInstalledError();
+  if (result.exitCode !== 0) {
+    throw mapWranglerError(result.stderr || result.stdout, result.exitCode);
+  }
 }
 
 /**
@@ -82,10 +150,7 @@ export async function wranglerJson<T = unknown>(
   opts?: RunOptions,
 ): Promise<T> {
   const result = await run(args, opts);
-  if (result.stderr === "ENOENT") throw wranglerNotInstalledError();
-  if (result.exitCode !== 0) {
-    throw mapWranglerError(result.stderr || result.stdout, result.exitCode);
-  }
+  checkResult(args, result, opts);
   try {
     return JSON.parse(extractJson(result.stdout)) as T;
   } catch {
@@ -103,10 +168,7 @@ export async function wranglerExec(
   opts?: RunOptions,
 ): Promise<string> {
   const result = await run(args, opts);
-  if (result.stderr === "ENOENT") throw wranglerNotInstalledError();
-  if (result.exitCode !== 0) {
-    throw mapWranglerError(result.stderr || result.stdout, result.exitCode);
-  }
+  checkResult(args, result, opts);
   return result.stdout;
 }
 

@@ -23,14 +23,18 @@ examples:
 
 const USAGE = "cloudflare-axi deployments [--config <path>]";
 
-/** `wrangler deployments list --json`, from cwd or from the config's directory. */
+/**
+ * `wrangler deployments list --json`, from cwd or from the config's directory.
+ * `timeoutMs` bounds the spawn (the dashboard passes one).
+ */
 export function listDeployments(
   config: string | undefined,
+  timeoutMs?: number,
 ): Promise<WranglerDeployment[]> {
   return withConfigContext(config, () =>
     wranglerJson<WranglerDeployment[]>(
       ["deployments", "list", "--json", ...configArgs(config)],
-      configRunOptions(config),
+      { ...configRunOptions(config), timeoutMs },
     ),
   );
 }

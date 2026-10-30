@@ -1,7 +1,7 @@
 import { assertNoArgs } from "../args.js";
 import { notAuthenticatedError } from "../errors.js";
 import { encode } from "../toon.js";
-import { wranglerExec } from "../wrangler.js";
+import { WRANGLER_READ_TIMEOUT_MS, wranglerExec } from "../wrangler.js";
 
 export const WHOAMI_HELP = `usage: cloudflare-axi whoami
 Shows the Cloudflare account you are logged in as, with account name/id.
@@ -19,7 +19,9 @@ export interface WhoamiInfo {
 
 export async function whoamiCommand(args: string[]): Promise<string> {
   assertNoArgs("whoami", args);
-  const info = parseWhoami(await wranglerExec(["whoami"]));
+  const info = parseWhoami(
+    await wranglerExec(["whoami"], { timeoutMs: WRANGLER_READ_TIMEOUT_MS }),
+  );
   // Quirk: `wrangler whoami` exits 0 even when logged out, printing
   // "You are not authenticated. Please run `wrangler login`." on stdout —
   // surface that as a structured AUTH error, not a success.

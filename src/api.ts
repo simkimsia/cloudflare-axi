@@ -133,7 +133,11 @@ async function send<R>(
         `The Cloudflare API did not answer within ${timeoutMs / 1000}s (${method} ${path})`,
         "UNKNOWN",
         [
-          "Retry; if it keeps timing out, check https://www.cloudflarestatus.com and network access to api.cloudflare.com",
+          // A write may have gone through before the answer was lost.
+          method === "GET"
+            ? "Retry"
+            : `The ${method} may still have been applied: check the current state before retrying`,
+          "If it keeps timing out, check https://www.cloudflarestatus.com and network access to api.cloudflare.com",
         ],
       );
     }
