@@ -35,6 +35,7 @@ interface Fixture {
   invokedAs: string;
   path: string[];
   latest?: string;
+  platform?: NodeJS.Platform;
 }
 
 function makeDeps(fx: Fixture) {
@@ -51,8 +52,8 @@ function makeDeps(fx: Fixture) {
   };
   const deps: UpdateDeps = {
     invokedAs: fx.invokedAs,
-    env: { PATH: fx.path.join(":") },
-    platform: "darwin",
+    env: { PATH: fx.path.join(fx.platform === "win32" ? ";" : ":") },
+    platform: fx.platform ?? "darwin",
     existsSync: (p) => dirs.has(realpath(p)) || realpath(p) in fx.files,
     isDirectory: (p) => dirs.has(realpath(p)),
     readFileSync: (p) => {
@@ -166,6 +167,44 @@ describe("install inspection", () => {
   });
 });
 
+describe("Windows PATH copies", () => {
+  // The sh shim npm's cmd-shim writes next to cloudflare-axi.cmd (trimmed).
+  const NPM_SH_SHIM = `#!/bin/sh
+basedir=$(dirname "$(echo "$0" | sed -e 's,\\\\,/,g')")
+if [ -x "$basedir/node" ]; then
+  exec "$basedir/node"  "$basedir/node_modules/${PKG}/dist/bin/cloudflare-axi.js" "$@"
+else
+  exec node  "$basedir/node_modules/${PKG}/dist/bin/cloudflare-axi.js" "$@"
+fi
+`;
+  const PREFIX = "/Users/jane/AppData/Roaming/npm";
+  const ENTRY = `${PREFIX}/node_modules/${PKG}/dist/bin/cloudflare-axi.js`;
+
+  it("follows npm's shim beside the .cmd to the entry it runs", async () => {
+    const { deps } = makeDeps({
+      ...issueMachine(),
+      platform: "win32",
+      files: {
+        ...issueMachine().files,
+        [`${PREFIX}/cloudflare-axi.cmd`]: "@ECHO off\r\n",
+        [`${PREFIX}/cloudflare-axi`]: NPM_SH_SHIM,
+        [`${PREFIX}/node_modules/${PKG}/package.json`]: pkgJson("0.2.3"),
+        [ENTRY]: "#!/usr/bin/env node\n",
+      },
+      invokedAs: ENTRY,
+      path: [PREFIX, PNPM_HOME],
+    });
+    expect(findPathCopies(deps)[0]).toEqual({
+      path: `${PREFIX}/cloudflare-axi`,
+      target: ENTRY,
+      version: "0.2.3",
+    });
+    const out = await updateCommand(["--check"], deps);
+    expect(out).toMatch(/cloudflare-axi,0\.2\.3,yes,yes/);
+    expect(out).not.toContain("does not change what");
+  });
+});
+
 describe("update", () => {
   it("never npm-installs over a linked checkout; names the checkout, branch and rebuild", async () => {
     const { deps, calls } = makeDeps(issueMachine({ latest: "9.9.9" }));
@@ -179,7 +218,7 @@ describe("update", () => {
       `git -C ${CHECKOUT} pull --ff-only && pnpm -C ${CHECKOUT} install && pnpm -C ${CHECKOUT} run build`,
     );
     expect(out).not.toContain("npm install -g @");
-    expect(out).toContain("switch main");
+    expect(out).not.toContain("switch main");
     // Both PATH copies, with the link winning and marked as this copy.
     expect(out).toContain("2 copies of cloudflare-axi are on PATH");
     expect(out).toMatch(/cloudflare-axi,0\.2\.1,yes,yes/);
@@ -206,7 +245,35 @@ describe("update", () => {
     expect(out).toContain("upgraded");
     expect(out).toContain("does not change what `cloudflare-axi` runs");
     expect(out).toContain(`linked to ${CHECKOUT} (branch feat/kv-drop)`);
-    expect(out).toContain("pnpm rm -g @simkimsia/cloudflare-axi");
+    expect(out).not.toContain("pnpm rm");
+  });
+
+  it("gives no rebuild hint for a linked checkout that another copy shadows", async () => {
+    const { deps } = makeDeps(
+      issueMachine({
+        path: [`${NPM_ROOT}/bin`, PNPM_HOME],
+        latest: "9.9.9",
+      }),
+    );
+    const out = await updateCommand([], deps);
+    expect(out).toContain("install: linked checkout");
+    expect(out).toContain(`checkout: ${CHECKOUT}`);
+    expect(out).not.toContain("action: manual");
+    expect(out).not.toContain("pull --ff-only");
+    expect(out).toContain("does not change what `cloudflare-axi` runs");
+  });
+
+  it("drops the SDK's upgrade hint for an npm copy that a link shadows", async () => {
+    const { deps } = makeDeps(
+      issueMachine({
+        invokedAs: `${NPM_ROOT}/bin/cloudflare-axi`,
+        latest: "9.9.9",
+      }),
+    );
+    const out = await updateCommand(["--check"], deps);
+    expect(out).toContain("available: true");
+    expect(out).not.toContain("Run `cloudflare-axi update` to upgrade");
+    expect(out).toContain("does not change what `cloudflare-axi` runs");
   });
 
   it("passes the SDK result through for a lone npm install", async () => {
