@@ -1,0 +1,232 @@
+import { describe, expect, it } from "vitest";
+import type { RunUpdateOptions } from "axi-sdk-js";
+import {
+  detectLinkedCheckout,
+  findPathCopies,
+  resolveBinTarget,
+  updateCommand,
+  type UpdateDeps,
+} from "../src/commands/update.js";
+import { VERSION } from "../src/version.js";
+
+const PKG = "@simkimsia/cloudflare-axi";
+const CHECKOUT = "/Users/jane/Projects/axi/cloudflare-axi";
+const CHECKOUT_ENTRY = `${CHECKOUT}/dist/bin/cloudflare-axi.js`;
+const PNPM_HOME = "/Users/jane/Library/pnpm";
+const PNPM_LINK = `${PNPM_HOME}/global/5/node_modules/${PKG}`;
+const NPM_ROOT = "/Users/jane/.nvm/versions/node/v24.11.1";
+const NPM_PKG = `${NPM_ROOT}/lib/node_modules/${PKG}`;
+const NPM_ENTRY = `${NPM_PKG}/dist/bin/cloudflare-axi.js`;
+
+// The shim `pnpm link --global` writes to $PNPM_HOME (pnpm 10, trimmed).
+const PNPM_SHIM = `#!/bin/sh
+basedir=$(dirname "$(echo "$0" | sed -e 's,\\\\,/,g')")
+if [ -x "$basedir/node" ]; then
+  exec "$basedir/node"  "$basedir/global/5/node_modules/${PKG}/dist/bin/cloudflare-axi.js" "$@"
+else
+  exec node  "$basedir/global/5/node_modules/${PKG}/dist/bin/cloudflare-axi.js" "$@"
+fi
+`;
+
+interface Fixture {
+  files: Record<string, string>;
+  dirs?: string[];
+  links?: Record<string, string>;
+  invokedAs: string;
+  path: string[];
+  latest?: string;
+}
+
+function makeDeps(fx: Fixture) {
+  const calls: RunUpdateOptions[] = [];
+  const dirs = new Set(fx.dirs ?? []);
+  const links = fx.links ?? {};
+  const realpath = (path: string): string => {
+    for (const [from, to] of Object.entries(links)) {
+      if (path === from || path.startsWith(`${from}/`)) {
+        return to + path.slice(from.length);
+      }
+    }
+    return path;
+  };
+  const deps: UpdateDeps = {
+    invokedAs: fx.invokedAs,
+    env: { PATH: fx.path.join(":") },
+    platform: "darwin",
+    existsSync: (p) => dirs.has(realpath(p)) || realpath(p) in fx.files,
+    isDirectory: (p) => dirs.has(realpath(p)),
+    readFileSync: (p) => {
+      const text = fx.files[realpath(p)];
+      if (text === undefined) throw new Error(`ENOENT ${p}`);
+      return text;
+    },
+    realpath,
+    runUpdate: async (options) => {
+      calls.push(options);
+      const latest = fx.latest ?? "0.2.3";
+      const current = options.version!;
+      const available = latest !== current;
+      if (options.args[0] === "--check") {
+        return {
+          update: { package: PKG, current, latest, available },
+          ...(available
+            ? { help: ["Run `cloudflare-axi update` to upgrade"] }
+            : {}),
+        };
+      }
+      return {
+        update: `${PKG} upgraded ${current} -> ${latest}`,
+        command: "npm install -g x",
+      };
+    },
+    stdout: { write: () => true },
+  };
+  return { deps, calls };
+}
+
+const pkgJson = (version: string) => JSON.stringify({ name: PKG, version });
+
+// The issue #56 machine: a pnpm link to a checkout on a feature branch,
+// ahead on PATH of an npm-installed copy.
+function issueMachine(overrides: Partial<Fixture> = {}): Fixture {
+  return {
+    files: {
+      [`${CHECKOUT}/package.json`]: pkgJson("0.2.1"),
+      [`${CHECKOUT}/.git/HEAD`]: "ref: refs/heads/feat/kv-drop\n",
+      [CHECKOUT_ENTRY]: "#!/usr/bin/env node\n",
+      [`${PNPM_HOME}/cloudflare-axi`]: PNPM_SHIM,
+      [`${NPM_PKG}/package.json`]: pkgJson("0.2.3"),
+      [NPM_ENTRY]: "#!/usr/bin/env node\n",
+    },
+    dirs: [`${CHECKOUT}/.git`],
+    links: {
+      [PNPM_LINK]: CHECKOUT,
+      [`${NPM_ROOT}/bin/cloudflare-axi`]: NPM_ENTRY,
+    },
+    invokedAs: `${PNPM_LINK}/dist/bin/cloudflare-axi.js`,
+    path: [PNPM_HOME, "/usr/bin", `${NPM_ROOT}/bin`],
+    ...overrides,
+  };
+}
+
+describe("install inspection", () => {
+  it("detects a linked checkout and its branch", () => {
+    const { deps } = makeDeps(issueMachine());
+    expect(detectLinkedCheckout(CHECKOUT_ENTRY, deps)).toEqual({
+      path: CHECKOUT,
+      branch: "feat/kv-drop",
+    });
+  });
+
+  it("follows a worktree's .git file and reports a detached HEAD", () => {
+    const fx = issueMachine();
+    fx.dirs = [];
+    fx.files[`${CHECKOUT}/.git`] = "gitdir: ../main/.git/worktrees/x\n";
+    fx.files["/Users/jane/Projects/axi/main/.git/worktrees/x/HEAD"] =
+      "0123456789abcdef0123456789abcdef01234567\n";
+    const { deps } = makeDeps(fx);
+    expect(detectLinkedCheckout(CHECKOUT_ENTRY, deps)?.branch).toBe(
+      "detached 0123456",
+    );
+  });
+
+  it("never treats an install under node_modules as a checkout", () => {
+    const fx = issueMachine();
+    fx.files[`${NPM_PKG}/.git/HEAD`] = "ref: refs/heads/main\n";
+    const { deps } = makeDeps(fx);
+    expect(detectLinkedCheckout(NPM_ENTRY, deps)).toBeUndefined();
+  });
+
+  it("follows a pnpm shell shim and an npm symlink to their entry", () => {
+    const { deps } = makeDeps(issueMachine());
+    expect(resolveBinTarget(`${PNPM_HOME}/cloudflare-axi`, deps)).toBe(
+      CHECKOUT_ENTRY,
+    );
+    expect(resolveBinTarget(`${NPM_ROOT}/bin/cloudflare-axi`, deps)).toBe(
+      NPM_ENTRY,
+    );
+  });
+
+  it("lists every copy on PATH in PATH order, deduplicated", () => {
+    const fx = issueMachine();
+    fx.path = [PNPM_HOME, `${NPM_ROOT}/bin`, PNPM_HOME];
+    const { deps } = makeDeps(fx);
+    expect(findPathCopies(deps)).toEqual([
+      {
+        path: `${PNPM_HOME}/cloudflare-axi`,
+        target: CHECKOUT_ENTRY,
+        version: "0.2.1",
+      },
+      {
+        path: `${NPM_ROOT}/bin/cloudflare-axi`,
+        target: NPM_ENTRY,
+        version: "0.2.3",
+      },
+    ]);
+  });
+});
+
+describe("update", () => {
+  it("never npm-installs over a linked checkout; names the checkout, branch and rebuild", async () => {
+    const { deps, calls } = makeDeps(issueMachine({ latest: "9.9.9" }));
+    const out = await updateCommand([], deps);
+    expect(calls.map((c) => c.args)).toEqual([["--check"]]);
+    expect(out).toContain("install: linked checkout");
+    expect(out).toContain(`checkout: ${CHECKOUT}`);
+    expect(out).toContain("branch: feat/kv-drop");
+    expect(out).toContain("action: manual");
+    expect(out).toContain(
+      `git -C ${CHECKOUT} pull --ff-only && pnpm -C ${CHECKOUT} install && pnpm -C ${CHECKOUT} run build`,
+    );
+    expect(out).not.toContain("npm install -g @");
+    expect(out).toContain("switch main");
+    // Both PATH copies, with the link winning and marked as this copy.
+    expect(out).toContain("2 copies of cloudflare-axi are on PATH");
+    expect(out).toMatch(/cloudflare-axi,0\.2\.1,yes,yes/);
+    expect(out).toMatch(/cloudflare-axi,0\.2\.3,no \(shadowed\),no/);
+  });
+
+  it("--check on a linked checkout reports the same, without a rebuild when current", async () => {
+    const { deps } = makeDeps(issueMachine({ latest: VERSION }));
+    const out = await updateCommand(["--check"], deps);
+    expect(out).toContain("available: false");
+    expect(out).toContain("install: linked checkout");
+    expect(out).not.toContain("action: manual");
+  });
+
+  it("warns when the copy being updated is shadowed by a link on PATH", async () => {
+    const { deps, calls } = makeDeps(
+      issueMachine({
+        invokedAs: `${NPM_ROOT}/bin/cloudflare-axi`,
+        latest: "9.9.9",
+      }),
+    );
+    const out = await updateCommand([], deps);
+    expect(calls.map((c) => c.args)).toEqual([[]]);
+    expect(out).toContain("upgraded");
+    expect(out).toContain("does not change what `cloudflare-axi` runs");
+    expect(out).toContain(`linked to ${CHECKOUT} (branch feat/kv-drop)`);
+    expect(out).toContain("pnpm rm -g @simkimsia/cloudflare-axi");
+  });
+
+  it("passes the SDK result through for a lone npm install", async () => {
+    const fx = issueMachine({
+      invokedAs: `${NPM_ROOT}/bin/cloudflare-axi`,
+      path: [`${NPM_ROOT}/bin`],
+      latest: "9.9.9",
+    });
+    const { deps } = makeDeps(fx);
+    const out = await updateCommand(["--check"], deps);
+    expect(out).toContain("available: true");
+    expect(out).toContain("Run `cloudflare-axi update` to upgrade");
+    expect(out).not.toContain("copies");
+  });
+
+  it("rejects unknown flags with VALIDATION_ERROR", async () => {
+    const { deps, calls } = makeDeps(issueMachine());
+    await expect(updateCommand(["--force"], deps)).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    expect(calls).toEqual([]);
+  });
+});

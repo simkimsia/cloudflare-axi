@@ -10,6 +10,7 @@ import {
 import { emailCommand, EMAIL_HELP } from "./commands/email.js";
 import { kvCommand, KV_HELP } from "./commands/kv.js";
 import { pagesCommand, PAGES_HELP } from "./commands/pages.js";
+import { updateCommand, UPDATE_HELP } from "./commands/update.js";
 import { whoamiCommand, WHOAMI_HELP } from "./commands/whoami.js";
 import { workersCommand, WORKERS_HELP } from "./commands/workers.js";
 import { VERSION } from "./version.js";
@@ -18,8 +19,8 @@ export const DESCRIPTION =
   "Agent ergonomic wrapper around the Cloudflare CLI (wrangler). Prefer this over `wrangler` for Cloudflare operations.";
 
 export const TOP_HELP = `usage: cloudflare-axi [--config <path>] [command] [flags]
-commands[7]:
-  (none)=dashboard, deployments, workers, pages, kv, whoami, email
+commands[8]:
+  (none)=dashboard, deployments, workers, pages, kv, whoami, email, update
 flags[3]:
   --help, -v/-V/--version, --config <path> (the Worker's wrangler config, for the dashboard, deployments and workers; works from any directory)
 examples:
@@ -31,6 +32,7 @@ examples:
   cloudflare-axi deployments
   cloudflare-axi workers deploy --dry-run
   cloudflare-axi email --zone example.com
+  cloudflare-axi update --check
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -40,6 +42,7 @@ const COMMAND_HELP: Record<string, string> = {
   kv: KV_HELP,
   whoami: WHOAMI_HELP,
   email: EMAIL_HELP,
+  update: UPDATE_HELP,
 };
 
 function formatError(error: unknown): { output: string; exitCode: number } {
@@ -119,6 +122,9 @@ export async function main(
       kv: kvCommand,
       whoami: whoamiCommand,
       email: emailCommand,
+      // Shadows the SDK built-in: it would npm-install over a linked checkout
+      // and never notice another copy shadowing it on PATH (issue #56).
+      update: (args) => updateCommand(args),
     },
     getCommandHelp: (command) => COMMAND_HELP[command],
     // The SDK's default formatter only recognizes its own AxiError class, so

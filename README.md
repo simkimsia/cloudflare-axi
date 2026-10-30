@@ -49,6 +49,10 @@ pnpm -C cloudflare-axi run build
 pnpm add -g link:$PWD/cloudflare-axi   # puts `cloudflare-axi` on PATH
 ```
 
+A linked clone can shadow an npm-installed copy. `cloudflare-axi update` says
+so, names the clone and branch, and prints the `git pull` + build to run
+instead of an `npm install -g` that would not change the copy that runs.
+
 ## Usage
 
 ```sh
@@ -87,7 +91,7 @@ cloudflare-axi email forward hello you@gmail.com --zone example.com  # hello@exa
 cloudflare-axi email unforward hello --zone example.com              # delete that rule ('*' disables the catch-all)
 cloudflare-axi --help
 cloudflare-axi --version    # fast path, never loads the command graph
-cloudflare-axi update       # self-update (built into axi-sdk-js)
+cloudflare-axi update       # self-update; a linked checkout gets git pull + build instead
 ```
 
 `--config <path>` works on every command that depends on a Worker's wrangler
