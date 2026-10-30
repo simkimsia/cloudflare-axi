@@ -129,7 +129,7 @@ export async function main(
     getCommandHelp: (command) => COMMAND_HELP[command],
     // The SDK's default formatter only recognizes its own AxiError class, so
     // route this package's AxiError through an equivalent hook (gh-axi pattern).
-    // The SDK's own AxiError (e.g. unknown flags on built-ins like `update`)
+    // The SDK's own AxiError (e.g. the SDK rejecting a leading flag)
     // keeps its code and help; only foreign throws become UNKNOWN.
     formatError,
   });
